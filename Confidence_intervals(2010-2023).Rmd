@@ -1,0 +1,4787 @@
+---
+title: "Preprocessing- Ramya"
+author: "Ramya Keerthi"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+
+```{r}
+install.packages("see") 
+```
+
+
+
+
+
+
+```{r}
+# Loading libraries and files
+########################################################################
+library(sjPlot)
+library(ordinal)
+library(ggplot2)
+library(data.table)
+library(reshape2)
+library(dplyr)
+library(survey)
+library(brms)
+library(viridis)
+library(mice)
+```
+
+```{r}
+
+#setwd("C:/Users/ramya/Indiana University/Pabon-Rodriguez, Felix - Ramya-Spring2025-ImmunizationProjectCDC")
+# Loading files
+load(file = "./New Data Files/NISPUF10.RData")
+#load(file = "C:\\Users\\ramya\\Indiana University\\Pabon-Rodriguez, Felix - Ramya-Spring2025-ImmunizationProjectCDC\\New Data Files\\NISPUF10.RData")
+load(file = "./New Data Files/NISPUF11.RData")
+load(file = "./New Data Files/NISPUF12.RData")
+load(file = "./New Data Files/NISPUF13.RData")
+load(file = "./New Data Files/NISPUF14.RData")
+load(file = "./New Data Files/nispuf15new.RData")
+load(file = "./New Data Files/NISPUF16.RData")
+load(file = "./New Data Files/NISPUF17.RData")
+load(file = "./New Data Files/NISPUF18.RData")
+load(file = "./New Data Files/NISPUF19.RData")
+load(file = "./New Data Files/NISPUF20.RData")
+load(file = "./New Data Files/NISPUF21.RData")
+load(file = "./New Data Files/NISPUF22.RData")
+load(file = "./New Data Files/NISPUF23.RData")
+```
+
+
+
+```{r}
+# If the object loaded as "nispuf15new"
+# Simply assign it to a new name
+NISPUF15 <- nispuf15new
+
+# Now you can use NISPUF15 in your code
+# If you want to remove the old named object to avoid confusion
+rm(nispuf15new)
+```
+
+
+
+```{r}
+convert_pdat_to_factor <- function(dataset_prefix, start_num, end_num) {
+  # Process each dataset in the range
+  for(i in start_num:end_num) {
+    # Construct the dataset name
+    dataset_name <- paste0(dataset_prefix, i)
+    
+    # Check if dataset exists
+    if(exists(dataset_name, envir = .GlobalEnv)) {
+      # Get the dataset
+      dataset <- get(dataset_name, envir = .GlobalEnv)
+      
+      # Check if PDAT column exists
+      if("PDAT" %in% names(dataset)) {
+        # Convert PDAT to factor
+        dataset$PDAT <- factor(dataset$PDAT)
+        
+        # Update the dataset in the global environment
+        assign(dataset_name, dataset, envir = .GlobalEnv)
+        
+        # Print confirmation
+        cat(paste0("Converted PDAT in ", dataset_name, " to factor\n"))
+      } else {
+        cat(paste0("No PDAT column found in ", dataset_name, "\n"))
+      }
+    } else {
+      cat(paste0("Dataset '", dataset_name, "' not found in environment\n"))
+    }
+  }
+}
+
+# To convert PDAT to factor in NISPUF10 through NISPUF22:
+convert_pdat_to_factor("NISPUF", 10, 23)
+```
+
+
+
+
+
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df22 <- NISPUF22[NISPUF22$PDAT==levels(NISPUF22$PDAT)[1],]
+sum(is.na(df22$PROVWT_C)) # Count missing weights (remove those with NA)
+df222 <- subset(df22, !is.na(PROVWT_C))
+```
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2022)
+df222$DTaP_Coverage_2022 <- ifelse(is.na(df222$P_NUMDTP), NA, 
+                                 ifelse(df222$P_NUMDTP >= 4, 1, 0))
+df222$Polio_Coverage_2022 <- ifelse(is.na(df222$P_NUMPOL), NA, 
+                                  ifelse(df222$P_NUMPOL >= 3, 1, 0))
+df222$MMR_Coverage_2022 <- ifelse(is.na(df222$P_NUMMMR), NA, 
+                                ifelse(df222$P_NUMMMR >= 1, 1, 0))
+df222$Hib_Coverage_2022 <- ifelse(is.na(df222$P_NUMHIB), NA, 
+                                ifelse(df222$P_NUMHIB >= 3, 1, 0)) 
+df222$HepB_Coverage_2022 <- ifelse(is.na(df222$P_NUMHEP), NA, 
+                                 ifelse(df222$P_NUMHEP >= 3, 1, 0))
+df222$Varicella_Coverage_2022 <- ifelse(is.na(df222$P_NUMVRC), NA, 
+                                      ifelse(df222$P_NUMVRC >= 1, 1, 0))
+df222$PCV_Coverage_2022 <- ifelse(is.na(df222$P_NUMPCV), NA, 
+                                ifelse(df222$P_NUMPCV >= 4, 1, 0))
+df222$Influenza_Coverage_2022 <- ifelse(is.na(df222$P_NUMFLU), NA, 
+                                      ifelse(df222$P_NUMFLU >= 1, 1, 0))
+df222$HepA_Coverage_2022 <- ifelse(is.na(df222$P_NUMHEA), NA, 
+                                 ifelse(df222$P_NUMHEA >= 2, 1, 0))
+df222$Rotavirus_Coverage_2022 <- ifelse(is.na(df222$P_NUMROT), NA, 
+                                      ifelse(df222$P_NUMROT >= 2, 1, 0))
+
+```
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design22 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_C,   # Sampling weights
+  data = df222)
+
+```
+
+
+
+```{r}
+# Compute Confidence Intervals for 2022
+ci_DTaP_2022 <- svymean(~DTaP_Coverage_2022, nis_design22, na.rm = TRUE)
+ci_Polio_2022 <- svymean(~Polio_Coverage_2022, nis_design22, na.rm = TRUE)
+ci_MMR_2022 <- svymean(~MMR_Coverage_2022, nis_design22, na.rm = TRUE)
+ci_Hib_2022 <- svymean(~Hib_Coverage_2022, nis_design22, na.rm = TRUE)
+ci_HepB_2022 <- svymean(~HepB_Coverage_2022, nis_design22, na.rm = TRUE)
+ci_Varicella_2022 <- svymean(~Varicella_Coverage_2022, nis_design22, na.rm = TRUE)
+ci_PCV_2022 <- svymean(~PCV_Coverage_2022, nis_design22, na.rm = TRUE)
+ci_Influenza_2022 <- svymean(~Influenza_Coverage_2022, nis_design22, na.rm = TRUE)
+ci_HepA_2022 <- svymean(~HepA_Coverage_2022, nis_design22, na.rm = TRUE)
+ci_Rotavirus_2022 <- svymean(~Rotavirus_Coverage_2022, nis_design22, na.rm = TRUE)
+```
+
+
+
+```{r}
+ci_results_2022 <- data.frame(
+  Year = 2022,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2022), coef(ci_Polio_2022), coef(ci_MMR_2022), coef(ci_Hib_2022), coef(ci_HepB_2022),
+           coef(ci_Varicella_2022), coef(ci_PCV_2022), coef(ci_Influenza_2022), coef(ci_HepA_2022), coef(ci_Rotavirus_2022)),
+  Lower_CI = c(confint(ci_DTaP_2022)[,1], confint(ci_Polio_2022)[,1], confint(ci_MMR_2022)[,1], confint(ci_Hib_2022)[,1], confint(ci_HepB_2022)[,1],
+               confint(ci_Varicella_2022)[,1], confint(ci_PCV_2022)[,1], confint(ci_Influenza_2022)[,1], confint(ci_HepA_2022)[,1], confint(ci_Rotavirus_2022)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2022)[,2], confint(ci_Polio_2022)[,2], confint(ci_MMR_2022)[,2], confint(ci_Hib_2022)[,2], confint(ci_HepB_2022)[,2],
+               confint(ci_Varicella_2022)[,2], confint(ci_PCV_2022)[,2], confint(ci_Influenza_2022)[,2], confint(ci_HepA_2022)[,2], confint(ci_Rotavirus_2022)[,2])
+)
+
+# View results
+ci_results_2022
+```
+
+
+
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2022$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data22 <- subset(ci_results_2022, Vaccine == vaccine)
+  
+  # Create the plot
+  p22 <- ggplot(vaccine_data22, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2022)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p22)
+}
+
+```
+
+
+
+
+#2010
+
+
+
+```{r}
+NISPUF10$PDAT<- factor(NISPUF10$PDAT)
+class(NISPUF10$PDAT)
+```
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df10 <- NISPUF10[NISPUF10$PDAT==levels(NISPUF10$PDAT)[1],]
+sum(is.na(df10$PROVWT)) # Count missing weights (remove those with NA)
+df102 <- subset(df10, !is.na(PROVWT))
+```
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2010)
+df102$DTaP_Coverage_2010 <- ifelse(is.na(df102$P_NUMDTP), NA, 
+                                 ifelse(df102$P_NUMDTP >= 4, 1, 0))
+df102$Polio_Coverage_2010 <- ifelse(is.na(df102$P_NUMPOL), NA, 
+                                  ifelse(df102$P_NUMPOL >= 3, 1, 0))
+df102$MMR_Coverage_2010 <- ifelse(is.na(df102$P_NUMMMR), NA, 
+                                ifelse(df102$P_NUMMMR >= 1, 1, 0))
+df102$Hib_Coverage_2010 <- ifelse(is.na(df102$P_NUMHIB), NA, 
+                                ifelse(df102$P_NUMHIB >= 3, 1, 0)) 
+df102$HepB_Coverage_2010 <- ifelse(is.na(df102$P_NUMHEP), NA, 
+                                 ifelse(df102$P_NUMHEP >= 3, 1, 0))
+df102$Varicella_Coverage_2010 <- ifelse(is.na(df102$P_NUMVRC), NA, 
+                                      ifelse(df102$P_NUMVRC >= 1, 1, 0))
+df102$PCV_Coverage_2010 <- ifelse(is.na(df102$P_NUMPCV), NA, 
+                                ifelse(df102$P_NUMPCV >= 4, 1, 0))
+df102$Influenza_Coverage_2010 <- ifelse(is.na(df102$P_NUMFLU), NA, 
+                                      ifelse(df102$P_NUMFLU >= 1, 1, 0))
+df102$HepA_Coverage_2010 <- ifelse(is.na(df102$P_NUMHEA), NA, 
+                                 ifelse(df102$P_NUMHEA >= 2, 1, 0))
+df102$Rotavirus_Coverage_2010 <- ifelse(is.na(df102$P_NUMROT), NA, 
+                                      ifelse(df102$P_NUMROT >= 2, 1, 0))
+```
+
+
+
+
+
+
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design10 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+      # Stratification
+  weights = ~PROVWT,   # Sampling weights
+  data = df102)
+```
+
+```{r}
+# Compute Confidence Intervals for 2010
+ci_DT_2010 <- svymean(~DTaP_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Polio_2010 <- svymean(~Polio_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_MMR_2010 <- svymean(~MMR_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Hib_2010 <- svymean(~Hib_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_HepB_2010 <- svymean(~HepB_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Varicella_2010 <- svymean(~Varicella_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_PCV_2010 <- svymean(~PCV_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Influenza_2010 <- svymean(~Influenza_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_HepA_2010 <- svymean(~HepA_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Rotavirus_2010 <- svymean(~Rotavirus_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_DTaP_2010 <- svymean(~DTaP_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Polio_2010 <- svymean(~Polio_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_MMR_2010 <- svymean(~MMR_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Hib_2010 <- svymean(~Hib_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_HepB_2010 <- svymean(~HepB_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Varicella_2010 <- svymean(~Varicella_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_PCV_2010 <- svymean(~PCV_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Influenza_2010 <- svymean(~Influenza_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_HepA_2010 <- svymean(~HepA_Coverage_2010, nis_design10, na.rm = TRUE)
+ci_Rotavirus_2010 <- svymean(~Rotavirus_Coverage_2010, nis_design10, na.rm = TRUE)
+
+```
+
+
+
+
+```{r}
+# Create a data frame for 2010 confidence intervals
+ci_results_2010 <- data.frame(
+  Year = 2010,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2010), coef(ci_Polio_2010), coef(ci_MMR_2010), coef(ci_Hib_2010), coef(ci_HepB_2010),
+           coef(ci_Varicella_2010), coef(ci_PCV_2010), coef(ci_Influenza_2010), coef(ci_HepA_2010), coef(ci_Rotavirus_2010)),
+  Lower_CI = c(confint(ci_DTaP_2010)[,1], confint(ci_Polio_2010)[,1], confint(ci_MMR_2010)[,1], confint(ci_Hib_2010)[,1], confint(ci_HepB_2010)[,1],
+               confint(ci_Varicella_2010)[,1], confint(ci_PCV_2010)[,1], confint(ci_Influenza_2010)[,1], confint(ci_HepA_2010)[,1], confint(ci_Rotavirus_2010)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2010)[,2], confint(ci_Polio_2010)[,2], confint(ci_MMR_2010)[,2], confint(ci_Hib_2010)[,2], confint(ci_HepB_2010)[,2],
+               confint(ci_Varicella_2010)[,2], confint(ci_PCV_2010)[,2], confint(ci_Influenza_2010)[,2], confint(ci_HepA_2010)[,2], confint(ci_Rotavirus_2010)[,2])
+)
+
+# View results
+ci_results_2010
+
+```
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2010$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data10 <- subset(ci_results_2010, Vaccine == vaccine)
+  
+  # Create the plot
+  p <- ggplot(vaccine_data10, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2010)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p)
+}
+```
+
+#2011
+
+
+
+```{r}
+NISPUF11$PDAT<- factor(NISPUF11$PDAT)
+class(NISPUF11$PDAT)
+```
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df11 <- NISPUF11[NISPUF11$PDAT==levels(NISPUF11$PDAT)[1],]
+sum(is.na(df11$PROVWT_D)) # Count missing weights (remove those with NA)
+df112 <- subset(df11, !is.na(PROVWT_D))
+```
+
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2018)
+df112$DTaP_Coverage_2011 <- ifelse(is.na(df112$P_NUMDTP), NA, 
+                                   ifelse(df112$P_NUMDTP >= 4, 1, 0))
+df112$Polio_Coverage_2011 <- ifelse(is.na(df112$P_NUMPOL), NA, 
+                                    ifelse(df112$P_NUMPOL >= 3, 1, 0))
+df112$MMR_Coverage_2011 <- ifelse(is.na(df112$P_NUMMMR), NA, 
+                                  ifelse(df112$P_NUMMMR >= 1, 1, 0))
+df112$Hib_Coverage_2011 <- ifelse(is.na(df112$P_NUMHIB), NA, 
+                                  ifelse(df112$P_NUMHIB >= 3, 1, 0)) 
+df112$HepB_Coverage_2011 <- ifelse(is.na(df112$P_NUMHEP), NA, 
+                                   ifelse(df112$P_NUMHEP >= 3, 1, 0))
+df112$Varicella_Coverage_2011 <- ifelse(is.na(df112$P_NUMVRC), NA, 
+                                        ifelse(df112$P_NUMVRC >= 1, 1, 0))
+df112$PCV_Coverage_2011 <- ifelse(is.na(df112$P_NUMPCV), NA, 
+                                  ifelse(df112$P_NUMPCV >= 4, 1, 0))
+df112$Influenza_Coverage_2011 <- ifelse(is.na(df112$P_NUMFLU), NA, 
+                                        ifelse(df112$P_NUMFLU >= 1, 1, 0))
+df112$HepA_Coverage_2011 <- ifelse(is.na(df112$P_NUMHEA), NA, 
+                                   ifelse(df112$P_NUMHEA >= 2, 1, 0))
+df112$Rotavirus_Coverage_2011 <- ifelse(is.na(df112$P_NUMROT), NA, 
+                                        ifelse(df112$P_NUMROT >= 2, 1, 0))
+```
+
+
+```{r}
+
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design11 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM_D,     # Stratification
+  weights = ~PROVWT_D,   # Sampling weights
+  data = df112)
+```
+
+
+```{r}
+# Compute Confidence Intervals for 2011
+ci_DTaP_2011 <- svymean(~DTaP_Coverage_2011, nis_design11, na.rm = TRUE)
+ci_Polio_2011 <- svymean(~Polio_Coverage_2011, nis_design11, na.rm = TRUE)
+ci_MMR_2011 <- svymean(~MMR_Coverage_2011, nis_design11, na.rm = TRUE)
+ci_Hib_2011 <- svymean(~Hib_Coverage_2011, nis_design11, na.rm = TRUE)
+ci_HepB_2011 <- svymean(~HepB_Coverage_2011, nis_design11, na.rm = TRUE)
+ci_Varicella_2011 <- svymean(~Varicella_Coverage_2011, nis_design11, na.rm = TRUE)
+
+ci_PCV_2011 <- svymean(~PCV_Coverage_2011, nis_design11, na.rm = TRUE)
+ci_Influenza_2011 <- svymean(~Influenza_Coverage_2011, nis_design11, na.rm = TRUE)
+ci_HepA_2011 <- svymean(~HepA_Coverage_2011, nis_design11, na.rm = TRUE)
+ci_Rotavirus_2011 <- svymean(~Rotavirus_Coverage_2011, nis_design11, na.rm = TRUE)
+```
+
+
+```{r}
+
+# Create a data frame for 2011 confidence intervals
+ci_results_2011 <- data.frame(
+  Year = 2011,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2011), coef(ci_Polio_2011), coef(ci_MMR_2011), coef(ci_Hib_2011), coef(ci_HepB_2011),
+           coef(ci_Varicella_2011), coef(ci_PCV_2011), coef(ci_Influenza_2011), coef(ci_HepA_2011), coef(ci_Rotavirus_2011)),
+  Lower_CI = c(confint(ci_DTaP_2011)[,1], confint(ci_Polio_2011)[,1], confint(ci_MMR_2011)[,1], confint(ci_Hib_2011)[,1], confint(ci_HepB_2011)[,1],
+               confint(ci_Varicella_2011)[,1], confint(ci_PCV_2011)[,1], confint(ci_Influenza_2011)[,1], confint(ci_HepA_2011)[,1], confint(ci_Rotavirus_2011)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2011)[,2], confint(ci_Polio_2011)[,2], confint(ci_MMR_2011)[,2], confint(ci_Hib_2011)[,2], confint(ci_HepB_2011)[,2],
+               confint(ci_Varicella_2011)[,2], confint(ci_PCV_2011)[,2], confint(ci_Influenza_2011)[,2], confint(ci_HepA_2011)[,2], confint(ci_Rotavirus_2011)[,2])
+)
+
+# View results
+ci_results_2011
+```
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2011$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data11 <- subset(ci_results_2011, Vaccine == vaccine)
+  
+  # Create the plot
+  p11 <- ggplot(vaccine_data11, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2011)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p11)
+}
+```
+
+#2012
+
+
+
+```{r}
+NISPUF12$PDAT<- factor(NISPUF12$PDAT)
+class(NISPUF12$PDAT)
+```
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df12 <- NISPUF12[NISPUF12$PDAT==levels(NISPUF12$PDAT)[1],]
+sum(is.na(df12$PROVWT_D)) # Count missing weights (remove those with NA)
+df122 <- subset(df12, !is.na(PROVWT_D))
+```
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2018)
+df122$DTaP_Coverage_2012 <- ifelse(is.na(df122$P_NUMDTP), NA, 
+                                   ifelse(df122$P_NUMDTP >= 4, 1, 0))
+df122$Polio_Coverage_2012 <- ifelse(is.na(df122$P_NUMPOL), NA, 
+                                    ifelse(df122$P_NUMPOL >= 3, 1, 0))
+df122$MMR_Coverage_2012 <- ifelse(is.na(df122$P_NUMMMR), NA, 
+                                  ifelse(df122$P_NUMMMR >= 1, 1, 0))
+df122$Hib_Coverage_2012 <- ifelse(is.na(df122$P_NUMHIB), NA, 
+                                  ifelse(df122$P_NUMHIB >= 3, 1, 0)) 
+df122$HepB_Coverage_2012 <- ifelse(is.na(df122$P_NUMHEP), NA, 
+                                   ifelse(df122$P_NUMHEP >= 3, 1, 0))
+df122$Varicella_Coverage_2012 <- ifelse(is.na(df122$P_NUMVRC), NA, 
+                                        ifelse(df122$P_NUMVRC >= 1, 1, 0))
+df122$PCV_Coverage_2012 <- ifelse(is.na(df122$P_NUMPCV), NA, 
+                                  ifelse(df122$P_NUMPCV >= 4, 1, 0))
+df122$Influenza_Coverage_2012 <- ifelse(is.na(df122$P_NUMFLU), NA, 
+                                        ifelse(df122$P_NUMFLU >= 1, 1, 0))
+df122$HepA_Coverage_2012 <- ifelse(is.na(df122$P_NUMHEA), NA, 
+                                   ifelse(df122$P_NUMHEA >= 2, 1, 0))
+df122$Rotavirus_Coverage_2012 <- ifelse(is.na(df122$P_NUMROT), NA, 
+                                        ifelse(df122$P_NUMROT >= 2, 1, 0))
+```
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design12 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_D,   # Sampling weights
+  data = df122)
+```
+
+
+```{r}
+# Compute Confidence Intervals for 2012
+ci_DTaP_2012 <- svymean(~DTaP_Coverage_2012, nis_design12, na.rm = TRUE)
+ci_Polio_2012 <- svymean(~Polio_Coverage_2012, nis_design12, na.rm = TRUE)
+ci_MMR_2012 <- svymean(~MMR_Coverage_2012, nis_design12, na.rm = TRUE)
+ci_Hib_2012 <- svymean(~Hib_Coverage_2012, nis_design12, na.rm = TRUE)
+ci_HepB_2012 <- svymean(~HepB_Coverage_2012, nis_design12, na.rm = TRUE)
+ci_Varicella_2012 <- svymean(~Varicella_Coverage_2012, nis_design12, na.rm = TRUE)
+
+ci_PCV_2012 <- svymean(~PCV_Coverage_2012, nis_design12, na.rm = TRUE)
+ci_Influenza_2012 <- svymean(~Influenza_Coverage_2012, nis_design12, na.rm = TRUE)
+ci_HepA_2012 <- svymean(~HepA_Coverage_2012, nis_design12, na.rm = TRUE)
+ci_Rotavirus_2012 <- svymean(~Rotavirus_Coverage_2012, nis_design12, na.rm = TRUE)
+```
+
+
+```{r}
+# Create a data frame for 2012 confidence intervals
+ci_results_2012 <- data.frame(
+  Year = 2012,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2012), coef(ci_Polio_2012), coef(ci_MMR_2012), coef(ci_Hib_2012), coef(ci_HepB_2012),
+           coef(ci_Varicella_2012), coef(ci_PCV_2012), coef(ci_Influenza_2012), coef(ci_HepA_2012), coef(ci_Rotavirus_2012)),
+  Lower_CI = c(confint(ci_DTaP_2012)[,1], confint(ci_Polio_2012)[,1], confint(ci_MMR_2012)[,1], confint(ci_Hib_2012)[,1], confint(ci_HepB_2012)[,1],
+               confint(ci_Varicella_2012)[,1], confint(ci_PCV_2012)[,1], confint(ci_Influenza_2012)[,1], confint(ci_HepA_2012)[,1], confint(ci_Rotavirus_2012)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2012)[,2], confint(ci_Polio_2012)[,2], confint(ci_MMR_2012)[,2], confint(ci_Hib_2012)[,2], confint(ci_HepB_2012)[,2],
+               confint(ci_Varicella_2012)[,2], confint(ci_PCV_2012)[,2], confint(ci_Influenza_2012)[,2], confint(ci_HepA_2012)[,2], confint(ci_Rotavirus_2012)[,2])
+)
+
+# View results
+ci_results_2012
+```
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2012$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data12 <- subset(ci_results_2012, Vaccine == vaccine)
+  
+  # Create the plot
+  p12 <- ggplot(vaccine_data12, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2012)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p12)
+}
+```
+
+#2013
+
+
+```{r}
+NISPUF13$PDAT<- factor(NISPUF13$PDAT)
+class(NISPUF13$PDAT)
+```
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df13 <- NISPUF13[NISPUF13$PDAT==levels(NISPUF13$PDAT)[1],]
+sum(is.na(df13$PROVWT_D)) # Count missing weights (remove those with NA)
+df132 <- subset(df13, !is.na(PROVWT_D))
+```
+
+
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2018)
+df132$DTaP_Coverage_2013 <- ifelse(is.na(df132$P_NUMDTP), NA, 
+                                   ifelse(df132$P_NUMDTP >= 4, 1, 0))
+df132$Polio_Coverage_2013 <- ifelse(is.na(df132$P_NUMPOL), NA, 
+                                    ifelse(df132$P_NUMPOL >= 3, 1, 0))
+df132$MMR_Coverage_2013 <- ifelse(is.na(df132$P_NUMMMR), NA, 
+                                  ifelse(df132$P_NUMMMR >= 1, 1, 0))
+df132$Hib_Coverage_2013 <- ifelse(is.na(df132$P_NUMHIB), NA, 
+                                  ifelse(df132$P_NUMHIB >= 3, 1, 0)) 
+df132$HepB_Coverage_2013 <- ifelse(is.na(df132$P_NUMHEP), NA, 
+                                   ifelse(df132$P_NUMHEP >= 3, 1, 0))
+df132$Varicella_Coverage_2013 <- ifelse(is.na(df132$P_NUMVRC), NA, 
+                                        ifelse(df132$P_NUMVRC >= 1, 1, 0))
+df132$PCV_Coverage_2013 <- ifelse(is.na(df132$P_NUMPCV), NA, 
+                                  ifelse(df132$P_NUMPCV >= 4, 1, 0))
+df132$Influenza_Coverage_2013 <- ifelse(is.na(df132$P_NUMFLU), NA, 
+                                        ifelse(df132$P_NUMFLU >= 1, 1, 0))
+df132$HepA_Coverage_2013 <- ifelse(is.na(df132$P_NUMHEA), NA, 
+                                   ifelse(df132$P_NUMHEA >= 2, 1, 0))
+df132$Rotavirus_Coverage_2013 <- ifelse(is.na(df132$P_NUMROT), NA, 
+                                        ifelse(df132$P_NUMROT >= 2, 1, 0))
+```
+
+
+```{r}
+
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design13 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_D,   # Sampling weights
+  data = df132)
+```
+
+
+```{r}
+# Compute Confidence Intervals for 2013
+ci_DTaP_2013 <- svymean(~DTaP_Coverage_2013, nis_design13, na.rm = TRUE)
+ci_Polio_2013 <- svymean(~Polio_Coverage_2013, nis_design13, na.rm = TRUE)
+ci_MMR_2013 <- svymean(~MMR_Coverage_2013, nis_design13, na.rm = TRUE)
+ci_Hib_2013 <- svymean(~Hib_Coverage_2013, nis_design13, na.rm = TRUE)
+ci_HepB_2013 <- svymean(~HepB_Coverage_2013, nis_design13, na.rm = TRUE)
+ci_Varicella_2013 <- svymean(~Varicella_Coverage_2013, nis_design13, na.rm = TRUE)
+
+ci_PCV_2013 <- svymean(~PCV_Coverage_2013, nis_design13, na.rm = TRUE)
+ci_Influenza_2013 <- svymean(~Influenza_Coverage_2013, nis_design13, na.rm = TRUE)
+ci_HepA_2013 <- svymean(~HepA_Coverage_2013, nis_design13, na.rm = TRUE)
+ci_Rotavirus_2013 <- svymean(~Rotavirus_Coverage_2013, nis_design13, na.rm = TRUE)
+```
+
+
+```{r}
+
+# Create a data frame for 2013 confidence intervals
+ci_results_2013 <- data.frame(
+  Year = 2013,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2013), coef(ci_Polio_2013), coef(ci_MMR_2013), coef(ci_Hib_2013), coef(ci_HepB_2013),
+           coef(ci_Varicella_2013), coef(ci_PCV_2013), coef(ci_Influenza_2013), coef(ci_HepA_2013), coef(ci_Rotavirus_2013)),
+  Lower_CI = c(confint(ci_DTaP_2013)[,1], confint(ci_Polio_2013)[,1], confint(ci_MMR_2013)[,1], confint(ci_Hib_2013)[,1], confint(ci_HepB_2013)[,1],
+               confint(ci_Varicella_2013)[,1], confint(ci_PCV_2013)[,1], confint(ci_Influenza_2013)[,1], confint(ci_HepA_2013)[,1], confint(ci_Rotavirus_2013)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2013)[,2], confint(ci_Polio_2013)[,2], confint(ci_MMR_2013)[,2], confint(ci_Hib_2013)[,2], confint(ci_HepB_2013)[,2],
+               confint(ci_Varicella_2013)[,2], confint(ci_PCV_2013)[,2], confint(ci_Influenza_2013)[,2], confint(ci_HepA_2013)[,2], confint(ci_Rotavirus_2013)[,2])
+)
+
+# View results
+ci_results_2013
+```
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2013$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data13 <- subset(ci_results_2013, Vaccine == vaccine)
+  
+  # Create the plot
+  p13 <- ggplot(vaccine_data13, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2013)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p13)
+}
+```
+
+
+
+#2014
+
+
+
+```{r}
+NISPUF14$PDAT<- factor(NISPUF14$PDAT)
+class(NISPUF14$PDAT)
+```
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df14 <- NISPUF14[NISPUF14$PDAT==levels(NISPUF14$PDAT)[1],]
+sum(is.na(df14$PROVWT_D)) # Count missing weights (remove those with NA)
+df142 <- subset(df14, !is.na(PROVWT_D))
+```
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2018)
+df142$DTaP_Coverage_2014 <- ifelse(is.na(df142$P_NUMDTP), NA, 
+                                   ifelse(df142$P_NUMDTP >= 4, 1, 0))
+df142$Polio_Coverage_2014 <- ifelse(is.na(df142$P_NUMPOL), NA, 
+                                    ifelse(df142$P_NUMPOL >= 3, 1, 0))
+df142$MMR_Coverage_2014 <- ifelse(is.na(df142$P_NUMMMR), NA, 
+                                  ifelse(df142$P_NUMMMR >= 1, 1, 0))
+df142$Hib_Coverage_2014 <- ifelse(is.na(df142$P_NUMHIB), NA, 
+                                  ifelse(df142$P_NUMHIB >= 3, 1, 0)) 
+df142$HepB_Coverage_2014 <- ifelse(is.na(df142$P_NUMHEP), NA, 
+                                   ifelse(df142$P_NUMHEP >= 3, 1, 0))
+df142$Varicella_Coverage_2014 <- ifelse(is.na(df142$P_NUMVRC), NA, 
+                                        ifelse(df142$P_NUMVRC >= 1, 1, 0))
+df142$PCV_Coverage_2014 <- ifelse(is.na(df142$P_NUMPCV), NA, 
+                                  ifelse(df142$P_NUMPCV >= 4, 1, 0))
+df142$Influenza_Coverage_2014 <- ifelse(is.na(df142$P_NUMFLU), NA, 
+                                        ifelse(df142$P_NUMFLU >= 1, 1, 0))
+df142$HepA_Coverage_2014 <- ifelse(is.na(df142$P_NUMHEA), NA, 
+                                   ifelse(df142$P_NUMHEA >= 2, 1, 0))
+df142$Rotavirus_Coverage_2014 <- ifelse(is.na(df142$P_NUMROT), NA, 
+                                        ifelse(df142$P_NUMROT >= 2, 1, 0))
+```
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design14 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_D,   # Sampling weights
+  data = df142)
+```
+
+
+```{r}
+# Compute Confidence Intervals for 2014
+ci_DTaP_2014 <- svymean(~DTaP_Coverage_2014, nis_design14, na.rm = TRUE)
+ci_Polio_2014 <- svymean(~Polio_Coverage_2014, nis_design14, na.rm = TRUE)
+ci_MMR_2014 <- svymean(~MMR_Coverage_2014, nis_design14, na.rm = TRUE)
+ci_Hib_2014 <- svymean(~Hib_Coverage_2014, nis_design14, na.rm = TRUE)
+ci_HepB_2014 <- svymean(~HepB_Coverage_2014, nis_design14, na.rm = TRUE)
+ci_Varicella_2014 <- svymean(~Varicella_Coverage_2014, nis_design14, na.rm = TRUE)
+
+ci_PCV_2014 <- svymean(~PCV_Coverage_2014, nis_design14, na.rm = TRUE)
+ci_Influenza_2014 <- svymean(~Influenza_Coverage_2014, nis_design14, na.rm = TRUE)
+ci_HepA_2014 <- svymean(~HepA_Coverage_2014, nis_design14, na.rm = TRUE)
+ci_Rotavirus_2014 <- svymean(~Rotavirus_Coverage_2014, nis_design14, na.rm = TRUE)
+```
+
+
+```{r}
+# Create a data frame for 2014 confidence intervals
+ci_results_2014 <- data.frame(
+  Year = 2014,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2014), coef(ci_Polio_2014), coef(ci_MMR_2014), coef(ci_Hib_2014), coef(ci_HepB_2014),
+           coef(ci_Varicella_2014), coef(ci_PCV_2014), coef(ci_Influenza_2014), coef(ci_HepA_2014), coef(ci_Rotavirus_2014)),
+  Lower_CI = c(confint(ci_DTaP_2014)[,1], confint(ci_Polio_2014)[,1], confint(ci_MMR_2014)[,1], confint(ci_Hib_2014)[,1], confint(ci_HepB_2014)[,1],
+               confint(ci_Varicella_2014)[,1], confint(ci_PCV_2014)[,1], confint(ci_Influenza_2014)[,1], confint(ci_HepA_2014)[,1], confint(ci_Rotavirus_2014)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2014)[,2], confint(ci_Polio_2014)[,2], confint(ci_MMR_2014)[,2], confint(ci_Hib_2014)[,2], confint(ci_HepB_2014)[,2],
+               confint(ci_Varicella_2014)[,2], confint(ci_PCV_2014)[,2], confint(ci_Influenza_2014)[,2], confint(ci_HepA_2014)[,2], confint(ci_Rotavirus_2014)[,2])
+)
+
+# View results
+ci_results_2014
+```
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2014$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data14 <- subset(ci_results_2014, Vaccine == vaccine)
+  
+  # Create the plot
+  p14 <- ggplot(vaccine_data14, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2014)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p14)
+}
+```
+
+#2015
+```{r}
+
+NISPUF15$PDAT<- factor(NISPUF15$PDAT)
+class(NISPUF15$PDAT)
+
+```
+
+
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df15 <- NISPUF15[NISPUF15$PDAT==levels(NISPUF15$PDAT)[1],]
+sum(is.na(df15$PROVWT_D)) # Count missing weights (remove those with NA)
+df152 <- subset(df15, !is.na(PROVWT_D))
+```
+
+
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2018)
+df152$DTaP_Coverage_2015 <- ifelse(is.na(df152$P_NUMDTP), NA, 
+                                   ifelse(df152$P_NUMDTP >= 4, 1, 0))
+df152$Polio_Coverage_2015 <- ifelse(is.na(df152$P_NUMPOL), NA, 
+                                    ifelse(df152$P_NUMPOL >= 3, 1, 0))
+df152$MMR_Coverage_2015 <- ifelse(is.na(df152$P_NUMMMR), NA, 
+                                  ifelse(df152$P_NUMMMR >= 1, 1, 0))
+df152$Hib_Coverage_2015 <- ifelse(is.na(df152$P_NUMHIB), NA, 
+                                  ifelse(df152$P_NUMHIB >= 3, 1, 0)) 
+df152$HepB_Coverage_2015 <- ifelse(is.na(df152$P_NUMHEP), NA, 
+                                   ifelse(df152$P_NUMHEP >= 3, 1, 0))
+df152$Varicella_Coverage_2015 <- ifelse(is.na(df152$P_NUMVRC), NA, 
+                                        ifelse(df152$P_NUMVRC >= 1, 1, 0))
+df152$PCV_Coverage_2015 <- ifelse(is.na(df152$P_NUMPCV), NA, 
+                                  ifelse(df152$P_NUMPCV >= 4, 1, 0))
+df152$Influenza_Coverage_2015 <- ifelse(is.na(df152$P_NUMFLU), NA, 
+                                        ifelse(df152$P_NUMFLU >= 1, 1, 0))
+df152$HepA_Coverage_2015 <- ifelse(is.na(df152$P_NUMHEA), NA, 
+                                   ifelse(df152$P_NUMHEA >= 2, 1, 0))
+df152$Rotavirus_Coverage_2015 <- ifelse(is.na(df152$P_NUMROT), NA, 
+                                        ifelse(df152$P_NUMROT >= 2, 1, 0))
+
+```
+
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design15 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_D,   # Sampling weights
+  data = df152)
+```
+
+
+```{r}
+# Compute Confidence Intervals for 2015
+ci_DTaP_2015 <- svymean(~DTaP_Coverage_2015, nis_design15, na.rm = TRUE)
+ci_Polio_2015 <- svymean(~Polio_Coverage_2015, nis_design15, na.rm = TRUE)
+ci_MMR_2015 <- svymean(~MMR_Coverage_2015, nis_design15, na.rm = TRUE)
+ci_Hib_2015 <- svymean(~Hib_Coverage_2015, nis_design15, na.rm = TRUE)
+ci_HepB_2015 <- svymean(~HepB_Coverage_2015, nis_design15, na.rm = TRUE)
+ci_Varicella_2015 <- svymean(~Varicella_Coverage_2015, nis_design15, na.rm = TRUE)
+
+ci_PCV_2015 <- svymean(~PCV_Coverage_2015, nis_design15, na.rm = TRUE)
+ci_Influenza_2015 <- svymean(~Influenza_Coverage_2015, nis_design15, na.rm = TRUE)
+ci_HepA_2015 <- svymean(~HepA_Coverage_2015, nis_design15, na.rm = TRUE)
+ci_Rotavirus_2015 <- svymean(~Rotavirus_Coverage_2015, nis_design15, na.rm = TRUE)
+```
+
+
+
+```{r}
+# Create a data frame for 2015 confidence intervals
+ci_results_2015 <- data.frame(
+  Year = 2015,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2015), coef(ci_Polio_2015), coef(ci_MMR_2015), coef(ci_Hib_2015), coef(ci_HepB_2015),
+           coef(ci_Varicella_2015), coef(ci_PCV_2015), coef(ci_Influenza_2015), coef(ci_HepA_2015), coef(ci_Rotavirus_2015)),
+  Lower_CI = c(confint(ci_DTaP_2015)[,1], confint(ci_Polio_2015)[,1], confint(ci_MMR_2015)[,1], confint(ci_Hib_2015)[,1], confint(ci_HepB_2015)[,1],
+               confint(ci_Varicella_2015)[,1], confint(ci_PCV_2015)[,1], confint(ci_Influenza_2015)[,1], confint(ci_HepA_2015)[,1], confint(ci_Rotavirus_2015)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2015)[,2], confint(ci_Polio_2015)[,2], confint(ci_MMR_2015)[,2], confint(ci_Hib_2015)[,2], confint(ci_HepB_2015)[,2],
+               confint(ci_Varicella_2015)[,2], confint(ci_PCV_2015)[,2], confint(ci_Influenza_2015)[,2], confint(ci_HepA_2015)[,2], confint(ci_Rotavirus_2015)[,2])
+)
+
+# View results
+ci_results_2015
+```
+
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2015$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data15 <- subset(ci_results_2015, Vaccine == vaccine)
+  
+  # Create the plot
+  p15 <- ggplot(vaccine_data15, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2015)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p15)
+}
+```
+
+#2016
+
+
+```{r}
+NISPUF16$PDAT<- factor(NISPUF16$PDAT)
+class(NISPUF16$PDAT)
+```
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df16 <- NISPUF16[NISPUF16$PDAT==levels(NISPUF16$PDAT)[1],]
+sum(is.na(df16$PROVWT_D)) # Count missing weights (remove those with NA)
+df162 <- subset(df16, !is.na(PROVWT_D))
+```
+
+
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2018)
+df162$DTaP_Coverage_2016 <- ifelse(is.na(df162$P_NUMDTP), NA, 
+                                   ifelse(df162$P_NUMDTP >= 4, 1, 0))
+df162$Polio_Coverage_2016 <- ifelse(is.na(df162$P_NUMPOL), NA, 
+                                    ifelse(df162$P_NUMPOL >= 3, 1, 0))
+df162$MMR_Coverage_2016 <- ifelse(is.na(df162$P_NUMMMR), NA, 
+                                  ifelse(df162$P_NUMMMR >= 1, 1, 0))
+df162$Hib_Coverage_2016 <- ifelse(is.na(df162$P_NUMHIB), NA, 
+                                  ifelse(df162$P_NUMHIB >= 3, 1, 0)) 
+df162$HepB_Coverage_2016 <- ifelse(is.na(df162$P_NUMHEP), NA, 
+                                   ifelse(df162$P_NUMHEP >= 3, 1, 0))
+df162$Varicella_Coverage_2016 <- ifelse(is.na(df162$P_NUMVRC), NA, 
+                                        ifelse(df162$P_NUMVRC >= 1, 1, 0))
+df162$PCV_Coverage_2016 <- ifelse(is.na(df162$P_NUMPCV), NA, 
+                                  ifelse(df162$P_NUMPCV >= 4, 1, 0))
+df162$Influenza_Coverage_2016 <- ifelse(is.na(df162$P_NUMFLU), NA, 
+                                        ifelse(df162$P_NUMFLU >= 1, 1, 0))
+df162$HepA_Coverage_2016 <- ifelse(is.na(df162$P_NUMHEA), NA, 
+                                   ifelse(df162$P_NUMHEA >= 2, 1, 0))
+df162$Rotavirus_Coverage_2016 <- ifelse(is.na(df162$P_NUMROT), NA, 
+                                        ifelse(df162$P_NUMROT >= 2, 1, 0))
+
+```
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design16 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_D,   # Sampling weights
+  data = df162)
+```
+
+
+
+```{r}
+# Compute Confidence Intervals for 2016
+ci_DTaP_2016 <- svymean(~DTaP_Coverage_2016, nis_design16, na.rm = TRUE)
+ci_Polio_2016 <- svymean(~Polio_Coverage_2016, nis_design16, na.rm = TRUE)
+ci_MMR_2016 <- svymean(~MMR_Coverage_2016, nis_design16, na.rm = TRUE)
+ci_Hib_2016 <- svymean(~Hib_Coverage_2016, nis_design16, na.rm = TRUE)
+ci_HepB_2016 <- svymean(~HepB_Coverage_2016, nis_design16, na.rm = TRUE)
+ci_Varicella_2016 <- svymean(~Varicella_Coverage_2016, nis_design16, na.rm = TRUE)
+
+ci_PCV_2016 <- svymean(~PCV_Coverage_2016, nis_design16, na.rm = TRUE)
+ci_Influenza_2016 <- svymean(~Influenza_Coverage_2016, nis_design16, na.rm = TRUE)
+ci_HepA_2016 <- svymean(~HepA_Coverage_2016, nis_design16, na.rm = TRUE)
+ci_Rotavirus_2016 <- svymean(~Rotavirus_Coverage_2016, nis_design16, na.rm = TRUE)
+```
+
+
+
+
+```{r}
+# Create a data frame for 2016 confidence intervals
+ci_results_2016 <- data.frame(
+  Year = 2016,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2016), coef(ci_Polio_2016), coef(ci_MMR_2016), coef(ci_Hib_2016), coef(ci_HepB_2016),
+           coef(ci_Varicella_2016), coef(ci_PCV_2016), coef(ci_Influenza_2016), coef(ci_HepA_2016), coef(ci_Rotavirus_2016)),
+  Lower_CI = c(confint(ci_DTaP_2016)[,1], confint(ci_Polio_2016)[,1], confint(ci_MMR_2016)[,1], confint(ci_Hib_2016)[,1], confint(ci_HepB_2016)[,1],
+               confint(ci_Varicella_2016)[,1], confint(ci_PCV_2016)[,1], confint(ci_Influenza_2016)[,1], confint(ci_HepA_2016)[,1], confint(ci_Rotavirus_2016)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2016)[,2], confint(ci_Polio_2016)[,2], confint(ci_MMR_2016)[,2], confint(ci_Hib_2016)[,2], confint(ci_HepB_2016)[,2],
+               confint(ci_Varicella_2016)[,2], confint(ci_PCV_2016)[,2], confint(ci_Influenza_2016)[,2], confint(ci_HepA_2016)[,2], confint(ci_Rotavirus_2016)[,2])
+)
+
+# View results
+ci_results_2016
+```
+
+
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2016$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data16 <- subset(ci_results_2016, Vaccine == vaccine)
+  
+  # Create the plot
+  p16 <- ggplot(vaccine_data16, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2016)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p16)
+}
+```
+
+#2017
+
+
+
+```{r}
+NISPUF17$PDAT<- factor(NISPUF17$PDAT)
+class(NISPUF17$PDAT)
+```
+
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df17 <- NISPUF17[NISPUF17$PDAT==levels(NISPUF17$PDAT)[1],]
+sum(is.na(df17$PROVWT_D)) # Count missing weights (remove those with NA)
+df172 <- subset(df17, !is.na(PROVWT_D))
+```
+
+
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (2017)
+df172$DTaP_Coverage_2017 <- ifelse(is.na(df172$P_NUMDTP), NA, 
+                                   ifelse(df172$P_NUMDTP >= 4, 1, 0))
+df172$Polio_Coverage_2017 <- ifelse(is.na(df172$P_NUMPOL), NA, 
+                                    ifelse(df172$P_NUMPOL >= 3, 1, 0))
+df172$MMR_Coverage_2017 <- ifelse(is.na(df172$P_NUMMMR), NA, 
+                                  ifelse(df172$P_NUMMMR >= 1, 1, 0))
+df172$Hib_Coverage_2017 <- ifelse(is.na(df172$P_NUMHIB), NA, 
+                                  ifelse(df172$P_NUMHIB >= 3, 1, 0)) 
+df172$HepB_Coverage_2017 <- ifelse(is.na(df172$P_NUMHEP), NA, 
+                                   ifelse(df172$P_NUMHEP >= 3, 1, 0))
+df172$Varicella_Coverage_2017 <- ifelse(is.na(df172$P_NUMVRC), NA, 
+                                        ifelse(df172$P_NUMVRC >= 1, 1, 0))
+df172$PCV_Coverage_2017 <- ifelse(is.na(df172$P_NUMPCV), NA, 
+                                  ifelse(df172$P_NUMPCV >= 4, 1, 0))
+df172$Influenza_Coverage_2017 <- ifelse(is.na(df172$P_NUMFLU), NA, 
+                                        ifelse(df172$P_NUMFLU >= 1, 1, 0))
+df172$HepA_Coverage_2017 <- ifelse(is.na(df172$P_NUMHEA), NA, 
+                                   ifelse(df172$P_NUMHEA >= 2, 1, 0))
+df172$Rotavirus_Coverage_2017 <- ifelse(is.na(df172$P_NUMROT), NA, 
+                                        ifelse(df172$P_NUMROT >= 2, 1, 0))
+
+```
+
+
+
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design17 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_D,   # Sampling weights
+  data = df172)
+```
+
+
+
+
+```{r}
+# Compute Confidence Intervals for 2017
+ci_DTaP_2017 <- svymean(~DTaP_Coverage_2017, nis_design17, na.rm = TRUE)
+ci_Polio_2017 <- svymean(~Polio_Coverage_2017, nis_design17, na.rm = TRUE)
+ci_MMR_2017 <- svymean(~MMR_Coverage_2017, nis_design17, na.rm = TRUE)
+ci_Hib_2017 <- svymean(~Hib_Coverage_2017, nis_design17, na.rm = TRUE)
+ci_HepB_2017 <- svymean(~HepB_Coverage_2017, nis_design17, na.rm = TRUE)
+ci_Varicella_2017 <- svymean(~Varicella_Coverage_2017, nis_design17, na.rm = TRUE)
+
+ci_PCV_2017 <- svymean(~PCV_Coverage_2017, nis_design17, na.rm = TRUE)
+ci_Influenza_2017 <- svymean(~Influenza_Coverage_2017, nis_design17, na.rm = TRUE)
+ci_HepA_2017 <- svymean(~HepA_Coverage_2017, nis_design17, na.rm = TRUE)
+ci_Rotavirus_2017 <- svymean(~Rotavirus_Coverage_2017, nis_design17, na.rm = TRUE)
+```
+
+
+```{r}
+# Create a data frame for 2017 confidence intervals
+ci_results_2017 <- data.frame(
+  Year = 2017,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2017), coef(ci_Polio_2017), coef(ci_MMR_2017), coef(ci_Hib_2017), coef(ci_HepB_2017),
+           coef(ci_Varicella_2017), coef(ci_PCV_2017), coef(ci_Influenza_2017), coef(ci_HepA_2017), coef(ci_Rotavirus_2017)),
+  Lower_CI = c(confint(ci_DTaP_2017)[,1], confint(ci_Polio_2017)[,1], confint(ci_MMR_2017)[,1], confint(ci_Hib_2017)[,1], confint(ci_HepB_2017)[,1],
+               confint(ci_Varicella_2017)[,1], confint(ci_PCV_2017)[,1], confint(ci_Influenza_2017)[,1], confint(ci_HepA_2017)[,1], confint(ci_Rotavirus_2017)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2017)[,2], confint(ci_Polio_2017)[,2], confint(ci_MMR_2017)[,2], confint(ci_Hib_2017)[,2], confint(ci_HepB_2017)[,2],
+               confint(ci_Varicella_2017)[,2], confint(ci_PCV_2017)[,2], confint(ci_Influenza_2017)[,2], confint(ci_HepA_2017)[,2], confint(ci_Rotavirus_2017)[,2])
+)
+
+# View results
+ci_results_2017
+```
+
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2017$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data17 <- subset(ci_results_2017, Vaccine == vaccine)
+  
+  # Create the plot
+  p17 <- ggplot(vaccine_data17, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2017)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p17)
+}
+```
+
+#2018
+
+
+
+```{r}
+NISPUF18$PDAT<- factor(NISPUF18$PDAT)
+class(NISPUF18$PDAT)
+```
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df18 <- NISPUF18[NISPUF18$PDAT==levels(NISPUF18$PDAT)[1],]
+sum(is.na(df18$PROVWT_C)) # Count missing weights (remove those with NA)
+df182 <- subset(df18, !is.na(PROVWT_C))
+```
+
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2018)
+df182$DTaP_Coverage_2018 <- ifelse(is.na(df182$P_NUMDTP), NA, 
+                                   ifelse(df182$P_NUMDTP >= 4, 1, 0))
+df182$Polio_Coverage_2018 <- ifelse(is.na(df182$P_NUMPOL), NA, 
+                                    ifelse(df182$P_NUMPOL >= 3, 1, 0))
+df182$MMR_Coverage_2018 <- ifelse(is.na(df182$P_NUMMMR), NA, 
+                                  ifelse(df182$P_NUMMMR >= 1, 1, 0))
+df182$Hib_Coverage_2018 <- ifelse(is.na(df182$P_NUMHIB), NA, 
+                                  ifelse(df182$P_NUMHIB >= 3, 1, 0)) 
+df182$HepB_Coverage_2018 <- ifelse(is.na(df182$P_NUMHEP), NA, 
+                                   ifelse(df182$P_NUMHEP >= 3, 1, 0))
+df182$Varicella_Coverage_2018 <- ifelse(is.na(df182$P_NUMVRC), NA, 
+                                        ifelse(df182$P_NUMVRC >= 1, 1, 0))
+df182$PCV_Coverage_2018 <- ifelse(is.na(df182$P_NUMPCV), NA, 
+                                  ifelse(df182$P_NUMPCV >= 4, 1, 0))
+df182$Influenza_Coverage_2018 <- ifelse(is.na(df182$P_NUMFLU), NA, 
+                                        ifelse(df182$P_NUMFLU >= 1, 1, 0))
+df182$HepA_Coverage_2018 <- ifelse(is.na(df182$P_NUMHEA), NA, 
+                                   ifelse(df182$P_NUMHEA >= 2, 1, 0))
+df182$Rotavirus_Coverage_2018 <- ifelse(is.na(df182$P_NUMROT), NA, 
+                                        ifelse(df182$P_NUMROT >= 2, 1, 0))
+
+
+```
+
+
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design18 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_C,   # Sampling weights
+  data = df182)
+
+```
+
+
+
+
+
+```{r}
+# Compute Confidence Intervals for 2018
+ci_DTaP_2018 <- svymean(~DTaP_Coverage_2018, nis_design18, na.rm = TRUE)
+ci_Polio_2018 <- svymean(~Polio_Coverage_2018, nis_design18, na.rm = TRUE)
+ci_MMR_2018 <- svymean(~MMR_Coverage_2018, nis_design18, na.rm = TRUE)
+ci_Hib_2018 <- svymean(~Hib_Coverage_2018, nis_design18, na.rm = TRUE)
+ci_HepB_2018 <- svymean(~HepB_Coverage_2018, nis_design18, na.rm = TRUE)
+ci_Varicella_2018 <- svymean(~Varicella_Coverage_2018, nis_design18, na.rm = TRUE)
+
+ci_PCV_2018 <- svymean(~PCV_Coverage_2018, nis_design18, na.rm = TRUE)
+ci_Influenza_2018 <- svymean(~Influenza_Coverage_2018, nis_design18, na.rm = TRUE)
+ci_HepA_2018 <- svymean(~HepA_Coverage_2018, nis_design18, na.rm = TRUE)
+ci_Rotavirus_2018 <- svymean(~Rotavirus_Coverage_2018, nis_design18, na.rm = TRUE)
+
+
+```
+
+
+
+
+```{r}
+# Create a data frame for 2018 confidence intervals
+ci_results_2018 <- data.frame(
+  Year = 2018,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2018), coef(ci_Polio_2018), coef(ci_MMR_2018), coef(ci_Hib_2018), coef(ci_HepB_2018),
+           coef(ci_Varicella_2018), coef(ci_PCV_2018), coef(ci_Influenza_2018), coef(ci_HepA_2018), coef(ci_Rotavirus_2018)),
+  Lower_CI = c(confint(ci_DTaP_2018)[,1], confint(ci_Polio_2018)[,1], confint(ci_MMR_2018)[,1], confint(ci_Hib_2018)[,1], confint(ci_HepB_2018)[,1],
+               confint(ci_Varicella_2018)[,1], confint(ci_PCV_2018)[,1], confint(ci_Influenza_2018)[,1], confint(ci_HepA_2018)[,1], confint(ci_Rotavirus_2018)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2018)[,2], confint(ci_Polio_2018)[,2], confint(ci_MMR_2018)[,2], confint(ci_Hib_2018)[,2], confint(ci_HepB_2018)[,2],
+               confint(ci_Varicella_2018)[,2], confint(ci_PCV_2018)[,2], confint(ci_Influenza_2018)[,2], confint(ci_HepA_2018)[,2], confint(ci_Rotavirus_2018)[,2])
+)
+
+# View results
+ci_results_2018
+
+```
+
+
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2018$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data18 <- subset(ci_results_2018, Vaccine == vaccine)
+  
+  # Create the plot
+  p18 <- ggplot(vaccine_data18, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2018)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p18)
+}
+```
+
+
+#2019
+
+```{r}
+NISPUF19$PDAT<- factor(NISPUF19$PDAT)
+class(NISPUF19$PDAT)
+```
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df <- NISPUF19[NISPUF19$PDAT==levels(NISPUF19$PDAT)[1],]
+sum(is.na(df$PROVWT_C)) # Count missing weights (remove those with NA)
+df192 <- subset(df, !is.na(PROVWT_C))
+
+```
+
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2019)
+df192$DTaP_Coverage_2019 <- ifelse(is.na(df192$P_NUMDTP), NA, 
+                                   ifelse(df192$P_NUMDTP >= 4, 1, 0))
+df192$Polio_Coverage_2019 <- ifelse(is.na(df192$P_NUMPOL), NA, 
+                                    ifelse(df192$P_NUMPOL >= 3, 1, 0))
+df192$MMR_Coverage_2019 <- ifelse(is.na(df192$P_NUMMMR), NA, 
+                                  ifelse(df192$P_NUMMMR >= 1, 1, 0))
+df192$Hib_Coverage_2019 <- ifelse(is.na(df192$P_NUMHIB), NA, 
+                                  ifelse(df192$P_NUMHIB >= 3, 1, 0)) 
+df192$HepB_Coverage_2019 <- ifelse(is.na(df192$P_NUMHEP), NA, 
+                                   ifelse(df192$P_NUMHEP >= 3, 1, 0))
+df192$Varicella_Coverage_2019 <- ifelse(is.na(df192$P_NUMVRC), NA, 
+                                        ifelse(df192$P_NUMVRC >= 1, 1, 0))
+df192$PCV_Coverage_2019 <- ifelse(is.na(df192$P_NUMPCV), NA, 
+                                  ifelse(df192$P_NUMPCV >= 4, 1, 0))
+df192$Influenza_Coverage_2019 <- ifelse(is.na(df192$P_NUMFLU), NA, 
+                                        ifelse(df192$P_NUMFLU >= 1, 1, 0))
+df192$HepA_Coverage_2019 <- ifelse(is.na(df192$P_NUMHEA), NA, 
+                                   ifelse(df192$P_NUMHEA >= 2, 1, 0))
+df192$Rotavirus_Coverage_2019 <- ifelse(is.na(df192$P_NUMROT), NA, 
+                                        ifelse(df192$P_NUMROT >= 2, 1, 0))
+
+```
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design19 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_C,   # Sampling weights
+  data = df192)
+
+```
+
+
+
+```{r}
+# Compute Confidence Intervals for 2019
+ci_DTaP_2019 <- svymean(~DTaP_Coverage_2019, nis_design19, na.rm = TRUE)
+ci_Polio_2019 <- svymean(~Polio_Coverage_2019, nis_design19, na.rm = TRUE)
+ci_MMR_2019 <- svymean(~MMR_Coverage_2019, nis_design19, na.rm = TRUE)
+ci_Hib_2019 <- svymean(~Hib_Coverage_2019, nis_design19, na.rm = TRUE)
+ci_HepB_2019 <- svymean(~HepB_Coverage_2019, nis_design19, na.rm = TRUE)
+ci_Varicella_2019 <- svymean(~Varicella_Coverage_2019, nis_design19, na.rm = TRUE)
+ci_PCV_2019 <- svymean(~PCV_Coverage_2019, nis_design19, na.rm = TRUE)
+ci_Influenza_2019 <- svymean(~Influenza_Coverage_2019, nis_design19, na.rm = TRUE)
+ci_HepA_2019 <- svymean(~HepA_Coverage_2019, nis_design19, na.rm = TRUE)
+ci_Rotavirus_2019 <- svymean(~Rotavirus_Coverage_2019, nis_design19, na.rm = TRUE)
+
+```
+
+
+
+```{r}
+# Create a data frame for 2019 confidence intervals
+ci_results_2019 <- data.frame(
+  Year = 2019,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2019), coef(ci_Polio_2019), coef(ci_MMR_2019), coef(ci_Hib_2019), coef(ci_HepB_2019),
+           coef(ci_Varicella_2019), coef(ci_PCV_2019), coef(ci_Influenza_2019), coef(ci_HepA_2019), coef(ci_Rotavirus_2019)),
+  Lower_CI = c(confint(ci_DTaP_2019)[,1], confint(ci_Polio_2019)[,1], confint(ci_MMR_2019)[,1], confint(ci_Hib_2019)[,1], confint(ci_HepB_2019)[,1],
+               confint(ci_Varicella_2019)[,1], confint(ci_PCV_2019)[,1], confint(ci_Influenza_2019)[,1], confint(ci_HepA_2019)[,1], confint(ci_Rotavirus_2019)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2019)[,2], confint(ci_Polio_2019)[,2], confint(ci_MMR_2019)[,2], confint(ci_Hib_2019)[,2], confint(ci_HepB_2019)[,2],
+               confint(ci_Varicella_2019)[,2], confint(ci_PCV_2019)[,2], confint(ci_Influenza_2019)[,2], confint(ci_HepA_2019)[,2], confint(ci_Rotavirus_2019)[,2])
+)
+
+# View results
+ci_results_2019
+
+```
+
+
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2019$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data19 <- subset(ci_results_2019, Vaccine == vaccine)
+  
+  # Create the plot
+  p19 <- ggplot(vaccine_data19, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2019)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p19)
+}
+
+```
+
+
+
+
+
+#2020
+
+
+
+```{r}
+NISPUF20$PDAT<- factor(NISPUF20$PDAT)
+class(NISPUF20$PDAT)
+```
+
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df <- NISPUF20[NISPUF20$PDAT==levels(NISPUF20$PDAT)[1],]
+sum(is.na(df$PROVWT_C)) # Count missing weights (remove those with NA)
+df202 <- subset(df, !is.na(PROVWT_C))
+
+```
+
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2020)
+df202$DTaP_Coverage_2020 <- ifelse(is.na(df202$P_NUMDTP), NA, 
+                                   ifelse(df202$P_NUMDTP >= 4, 1, 0))
+df202$Polio_Coverage_2020 <- ifelse(is.na(df202$P_NUMPOL), NA, 
+                                    ifelse(df202$P_NUMPOL >= 3, 1, 0))
+df202$MMR_Coverage_2020 <- ifelse(is.na(df202$P_NUMMMR), NA, 
+                                  ifelse(df202$P_NUMMMR >= 1, 1, 0))
+df202$Hib_Coverage_2020 <- ifelse(is.na(df202$P_NUMHIB), NA, 
+                                  ifelse(df202$P_NUMHIB >= 3, 1, 0)) 
+df202$HepB_Coverage_2020 <- ifelse(is.na(df202$P_NUMHEP), NA, 
+                                   ifelse(df202$P_NUMHEP >= 3, 1, 0))
+df202$Varicella_Coverage_2020 <- ifelse(is.na(df202$P_NUMVRC), NA, 
+                                        ifelse(df202$P_NUMVRC >= 1, 1, 0))
+df202$PCV_Coverage_2020 <- ifelse(is.na(df202$P_NUMPCV), NA, 
+                                  ifelse(df202$P_NUMPCV >= 4, 1, 0))
+df202$Influenza_Coverage_2020 <- ifelse(is.na(df202$P_NUMFLU), NA, 
+                                        ifelse(df202$P_NUMFLU >= 1, 1, 0))
+df202$HepA_Coverage_2020 <- ifelse(is.na(df202$P_NUMHEA), NA, 
+                                   ifelse(df202$P_NUMHEA >= 2, 1, 0))
+df202$Rotavirus_Coverage_2020 <- ifelse(is.na(df202$P_NUMROT), NA, 
+                                        ifelse(df202$P_NUMROT >= 2, 1, 0))
+
+```
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design20 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_C,   # Sampling weights
+  data = df202)
+
+
+```
+
+
+```{r}
+# Compute Confidence Intervals for 2020
+ci_DTaP_2020 <- svymean(~DTaP_Coverage_2020, nis_design20, na.rm = TRUE)
+ci_Polio_2020 <- svymean(~Polio_Coverage_2020, nis_design20, na.rm = TRUE)
+ci_MMR_2020 <- svymean(~MMR_Coverage_2020, nis_design20, na.rm = TRUE)
+ci_Hib_2020 <- svymean(~Hib_Coverage_2020, nis_design20, na.rm = TRUE)
+ci_HepB_2020 <- svymean(~HepB_Coverage_2020, nis_design20, na.rm = TRUE)
+ci_Varicella_2020 <- svymean(~Varicella_Coverage_2020, nis_design20, na.rm = TRUE)
+ci_PCV_2020 <- svymean(~PCV_Coverage_2020, nis_design20, na.rm = TRUE)
+ci_Influenza_2020 <- svymean(~Influenza_Coverage_2020, nis_design20, na.rm = TRUE)
+ci_HepA_2020 <- svymean(~HepA_Coverage_2020, nis_design20, na.rm = TRUE)
+ci_Rotavirus_2020 <- svymean(~Rotavirus_Coverage_2020, nis_design20, na.rm = TRUE)
+
+```
+
+
+
+```{r}
+# Create a data frame for 2020 confidence intervals
+ci_results_2020 <- data.frame(
+  Year = 2020,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2020), coef(ci_Polio_2020), coef(ci_MMR_2020), coef(ci_Hib_2020), coef(ci_HepB_2020),
+           coef(ci_Varicella_2020), coef(ci_PCV_2020), coef(ci_Influenza_2020), coef(ci_HepA_2020), coef(ci_Rotavirus_2020)),
+  Lower_CI = c(confint(ci_DTaP_2020)[,1], confint(ci_Polio_2020)[,1], confint(ci_MMR_2020)[,1], confint(ci_Hib_2020)[,1], confint(ci_HepB_2020)[,1],
+               confint(ci_Varicella_2020)[,1], confint(ci_PCV_2020)[,1], confint(ci_Influenza_2020)[,1], confint(ci_HepA_2020)[,1], confint(ci_Rotavirus_2020)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2020)[,2], confint(ci_Polio_2020)[,2], confint(ci_MMR_2020)[,2], confint(ci_Hib_2020)[,2], confint(ci_HepB_2020)[,2],
+               confint(ci_Varicella_2020)[,2], confint(ci_PCV_2020)[,2], confint(ci_Influenza_2020)[,2], confint(ci_HepA_2020)[,2], confint(ci_Rotavirus_2020)[,2])
+)
+
+# View results
+ci_results_2020
+
+```
+
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2020$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data20 <- subset(ci_results_2020, Vaccine == vaccine)
+  
+  # Create the plot
+  p20 <- ggplot(vaccine_data20, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2020)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p20)
+}
+
+```
+
+
+
+
+
+
+#2021
+
+
+
+```{r}
+NISPUF21$PDAT<- factor(NISPUF21$PDAT)
+class(NISPUF21$PDAT)
+```
+
+
+
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df <- NISPUF21[NISPUF21$PDAT==levels(NISPUF21$PDAT)[1],]
+sum(is.na(df$PROVWT_C)) # Count missing weights (remove those with NA)
+df212 <- subset(df, !is.na(PROVWT_C))
+
+```
+
+
+
+
+
+
+
+```{r}
+# Define binary indicators with year suffix (_2021)
+df212$DTaP_Coverage_2021 <- ifelse(is.na(df212$P_NUMDTP), NA, 
+                                   ifelse(df212$P_NUMDTP >= 4, 1, 0))
+df212$Polio_Coverage_2021 <- ifelse(is.na(df212$P_NUMPOL), NA, 
+                                    ifelse(df212$P_NUMPOL >= 3, 1, 0))
+df212$MMR_Coverage_2021 <- ifelse(is.na(df212$P_NUMMMR), NA, 
+                                  ifelse(df212$P_NUMMMR >= 1, 1, 0))
+df212$Hib_Coverage_2021 <- ifelse(is.na(df212$P_NUMHIB), NA, 
+                                  ifelse(df212$P_NUMHIB >= 3, 1, 0)) 
+df212$HepB_Coverage_2021 <- ifelse(is.na(df212$P_NUMHEP), NA, 
+                                   ifelse(df212$P_NUMHEP >= 3, 1, 0))
+df212$Varicella_Coverage_2021 <- ifelse(is.na(df212$P_NUMVRC), NA, 
+                                        ifelse(df212$P_NUMVRC >= 1, 1, 0))
+df212$PCV_Coverage_2021 <- ifelse(is.na(df212$P_NUMPCV), NA, 
+                                  ifelse(df212$P_NUMPCV >= 4, 1, 0))
+df212$Influenza_Coverage_2021 <- ifelse(is.na(df212$P_NUMFLU), NA, 
+                                        ifelse(df212$P_NUMFLU >= 1, 1, 0))
+df212$HepA_Coverage_2021 <- ifelse(is.na(df212$P_NUMHEA), NA, 
+                                   ifelse(df212$P_NUMHEA >= 2, 1, 0))
+df212$Rotavirus_Coverage_2021 <- ifelse(is.na(df212$P_NUMROT), NA, 
+                                        ifelse(df212$P_NUMROT >= 2, 1, 0))
+
+```
+
+
+
+
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design21 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_C,   # Sampling weights
+  data = df212)
+
+```
+
+
+
+
+```{r}
+# Compute Confidence Intervals for 2021
+ci_DTaP_2021 <- svymean(~DTaP_Coverage_2021, nis_design21, na.rm = TRUE)
+ci_Polio_2021 <- svymean(~Polio_Coverage_2021, nis_design21, na.rm = TRUE)
+ci_MMR_2021 <- svymean(~MMR_Coverage_2021, nis_design21, na.rm = TRUE)
+ci_Hib_2021 <- svymean(~Hib_Coverage_2021, nis_design21, na.rm = TRUE)
+ci_HepB_2021 <- svymean(~HepB_Coverage_2021, nis_design21, na.rm = TRUE)
+ci_Varicella_2021 <- svymean(~Varicella_Coverage_2021, nis_design21, na.rm = TRUE)
+ci_PCV_2021 <- svymean(~PCV_Coverage_2021, nis_design21, na.rm = TRUE)
+ci_Influenza_2021 <- svymean(~Influenza_Coverage_2021, nis_design21, na.rm = TRUE)
+ci_HepA_2021 <- svymean(~HepA_Coverage_2021, nis_design21, na.rm = TRUE)
+ci_Rotavirus_2021 <- svymean(~Rotavirus_Coverage_2021, nis_design21, na.rm = TRUE)
+
+```
+
+
+
+```{r}
+# Create a data frame for 2021 confidence intervals
+ci_results_2021 <- data.frame(
+  Year = 2021,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2021), coef(ci_Polio_2021), coef(ci_MMR_2021), coef(ci_Hib_2021), coef(ci_HepB_2021),
+           coef(ci_Varicella_2021), coef(ci_PCV_2021), coef(ci_Influenza_2021), coef(ci_HepA_2021), coef(ci_Rotavirus_2021)),
+  Lower_CI = c(confint(ci_DTaP_2021)[,1], confint(ci_Polio_2021)[,1], confint(ci_MMR_2021)[,1], confint(ci_Hib_2021)[,1], confint(ci_HepB_2021)[,1],
+               confint(ci_Varicella_2021)[,1], confint(ci_PCV_2021)[,1], confint(ci_Influenza_2021)[,1], confint(ci_HepA_2021)[,1], confint(ci_Rotavirus_2021)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2021)[,2], confint(ci_Polio_2021)[,2], confint(ci_MMR_2021)[,2], confint(ci_Hib_2021)[,2], confint(ci_HepB_2021)[,2],
+               confint(ci_Varicella_2021)[,2], confint(ci_PCV_2021)[,2], confint(ci_Influenza_2021)[,2], confint(ci_HepA_2021)[,2], confint(ci_Rotavirus_2021)[,2])
+)
+
+# View results
+ci_results_2021
+
+```
+
+
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2021$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data21 <- subset(ci_results_2021, Vaccine == vaccine)
+  
+  # Create the plot
+  p21 <- ggplot(vaccine_data21, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2021)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p21)
+}
+
+```
+
+
+#2023
+```{r}
+NISPUF23$PDAT<- factor(NISPUF23$PDAT)
+class(NISPUF23$PDAT)
+```
+
+
+```{r}
+# Filter data to those children with (PDAT=1)
+# Level 1 = "CHILD HAS ADEQUATE PROVIDER DATA OR ZERO VACCINATIONS"
+df <- NISPUF23[NISPUF23$PDAT==levels(NISPUF23$PDAT)[1],]
+sum(is.na(df$PROVWT_C)) # Count missing weights (remove those with NA)
+df232 <- subset(df, !is.na(PROVWT_C))
+```
+
+
+```{r}
+# Define binary indicators with year suffix (_2023)
+df232$DTaP_Coverage_2023 <- ifelse(is.na(df232$P_NUMDTP), NA, 
+                                   ifelse(df232$P_NUMDTP >= 4, 1, 0))
+df232$Polio_Coverage_2023 <- ifelse(is.na(df232$P_NUMPOL), NA, 
+                                    ifelse(df232$P_NUMPOL >= 3, 1, 0))
+df232$MMR_Coverage_2023 <- ifelse(is.na(df232$P_NUMMMR), NA, 
+                                  ifelse(df232$P_NUMMMR >= 1, 1, 0))
+df232$Hib_Coverage_2023 <- ifelse(is.na(df232$P_NUMHIB), NA, 
+                                  ifelse(df232$P_NUMHIB >= 3, 1, 0)) 
+df232$HepB_Coverage_2023 <- ifelse(is.na(df232$P_NUMHEP), NA, 
+                                   ifelse(df232$P_NUMHEP >= 3, 1, 0))
+df232$Varicella_Coverage_2023 <- ifelse(is.na(df232$P_NUMVRC), NA, 
+                                        ifelse(df232$P_NUMVRC >= 1, 1, 0))
+df232$PCV_Coverage_2023 <- ifelse(is.na(df232$P_NUMPCV), NA, 
+                                  ifelse(df232$P_NUMPCV >= 4, 1, 0))
+df232$Influenza_Coverage_2023 <- ifelse(is.na(df232$P_NUMFLU), NA, 
+                                        ifelse(df232$P_NUMFLU >= 1, 1, 0))
+df232$HepA_Coverage_2023 <- ifelse(is.na(df232$P_NUMHEA), NA, 
+                                   ifelse(df232$P_NUMHEA >= 2, 1, 0))
+df232$Rotavirus_Coverage_2023 <- ifelse(is.na(df232$P_NUMROT), NA, 
+                                        ifelse(df232$P_NUMROT >= 2, 1, 0))
+```
+
+```{r}
+# Define survey design (this needs to be re-run as you add more variables)
+nis_design23 <- svydesign(
+  id = ~SEQNUMC,          # Clustering (Primary Sampling Unit)
+  strata = ~STRATUM,     # Stratification
+  weights = ~PROVWT_C,   # Sampling weights
+  data = df232)
+
+```
+
+
+```{r}
+# Compute Confidence Intervals for 2023
+ci_DTaP_2023 <- svymean(~DTaP_Coverage_2023, nis_design23, na.rm = TRUE)
+ci_Polio_2023 <- svymean(~Polio_Coverage_2023, nis_design23, na.rm = TRUE)
+ci_MMR_2023 <- svymean(~MMR_Coverage_2023, nis_design23, na.rm = TRUE)
+ci_Hib_2023 <- svymean(~Hib_Coverage_2023, nis_design23, na.rm = TRUE)
+ci_HepB_2023 <- svymean(~HepB_Coverage_2023, nis_design23, na.rm = TRUE)
+ci_Varicella_2023 <- svymean(~Varicella_Coverage_2023, nis_design23, na.rm = TRUE)
+ci_PCV_2023 <- svymean(~PCV_Coverage_2023, nis_design23, na.rm = TRUE)
+ci_Influenza_2023 <- svymean(~Influenza_Coverage_2023, nis_design23, na.rm = TRUE)
+ci_HepA_2023 <- svymean(~HepA_Coverage_2023, nis_design23, na.rm = TRUE)
+ci_Rotavirus_2023 <- svymean(~Rotavirus_Coverage_2023, nis_design23, na.rm = TRUE)
+
+```
+
+
+
+```{r}
+# Create a data frame for 2023 confidence intervals
+ci_results_2023 <- data.frame(
+  Year = 2023,
+  Vaccine = c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus"),
+  Mean = c(coef(ci_DTaP_2023), coef(ci_Polio_2023), coef(ci_MMR_2023), coef(ci_Hib_2023), coef(ci_HepB_2023),
+           coef(ci_Varicella_2023), coef(ci_PCV_2023), coef(ci_Influenza_2023), coef(ci_HepA_2023), coef(ci_Rotavirus_2023)),
+  Lower_CI = c(confint(ci_DTaP_2023)[,1], confint(ci_Polio_2023)[,1], confint(ci_MMR_2023)[,1], confint(ci_Hib_2023)[,1], confint(ci_HepB_2023)[,1],
+               confint(ci_Varicella_2023)[,1], confint(ci_PCV_2023)[,1], confint(ci_Influenza_2023)[,1], confint(ci_HepA_2023)[,1], confint(ci_Rotavirus_2023)[,1]),
+  Upper_CI = c(confint(ci_DTaP_2023)[,2], confint(ci_Polio_2023)[,2], confint(ci_MMR_2023)[,2], confint(ci_Hib_2023)[,2], confint(ci_HepB_2023)[,2],
+               confint(ci_Varicella_2023)[,2], confint(ci_PCV_2023)[,2], confint(ci_Influenza_2023)[,2], confint(ci_HepA_2023)[,2], confint(ci_Rotavirus_2023)[,2])
+)
+
+# View results
+ci_results_2023
+
+```
+
+
+
+
+```{r}
+# Loop through each vaccine and create a separate plot
+for (vaccine in ci_results_2023$Vaccine) {
+  
+  # Subset data for the current vaccine
+  vaccine_data23 <- subset(ci_results_2023, Vaccine == vaccine)
+  
+  # Create the plot
+  p23 <- ggplot(vaccine_data23, aes(x = Vaccine, y = Mean)) +
+    geom_point(color = "blue", size = 3) +  # Mean estimate
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+    ylim(0.5, 1) +  # Set y-axis limits for proportion representation
+    labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (2023)"),
+         y = "Proportion Vaccinated",
+         x = "Vaccine") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+  
+  # Print the plot
+  print(p23)
+}
+```
+
+#COMBINED PLOTTING (2010-2023)
+
+
+```{r}
+# Combine confidence interval results from 2018 to 2022
+all_ci_results <- rbind(ci_results_2010, ci_results_2011, ci_results_2012, ci_results_2013, ci_results_2014, ci_results_2015, ci_results_2016, ci_results_2017, ci_results_2018, ci_results_2019, ci_results_2020, ci_results_2021, ci_results_2022, ci_results_2023)
+
+```
+
+
+
+
+```{r}
+
+
+# Combine confidence interval results from 2010 to 2023
+all_ci_results <- rbind(
+  ci_results_2010, ci_results_2011, ci_results_2012, ci_results_2013, 
+  ci_results_2014, ci_results_2015, ci_results_2016, ci_results_2017, 
+  ci_results_2018, ci_results_2019, ci_results_2020, ci_results_2021, 
+  ci_results_2022, ci_results_2023
+)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+# Create a list to store all the individual plots
+plot_list <- list()
+# Create a shared y-axis title
+y_axis_title <- textGrob("Proportion Vaccinated", 
+                        gp = gpar(fontsize = 12, fontface = "bold"), 
+                        rot = 90)
+# Create a shared x-axis title
+x_axis_title <- textGrob("Year", 
+                        gp = gpar(fontsize = 12, fontface = "bold"))
+for (vaccine in unique(all_ci_results$Vaccine)) {
+  # Subset data for the current vaccine
+  vaccine_data <- subset(all_ci_results, Vaccine == vaccine)
+
+  # Create the plot for this vaccine
+  p <- ggplot(vaccine_data, aes(x = Year, y = Mean)) +
+    # First add manual grid lines that are perfectly square
+    geom_vline(xintercept = seq(2010, 2023, by = 1), color = "gray95", linewidth = 0.5) +
+    geom_hline(yintercept = seq(0.5, 1, by = 0.05), color = "gray95", linewidth = 0.5) +
+    geom_point(color = "blue", size = 1) +  # Fixed blue color
+    geom_line(color = "blue") +  # Fixed blue color
+    # Remove scale_color_okabeito() since we're not using color aesthetics
+    scale_y_continuous(limits = c(0.5, 1), breaks = c(0.5, 0.75, 1.0)) +
+    scale_x_continuous(breaks = seq(2010, 2023, by = 1)) +
+    labs(title = vaccine) +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", linewidth = 0.8),
+      axis.ticks = element_line(color = "black", linewidth = 0.8),
+      axis.text = element_text(color = "black", size = 8),
+      plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+      axis.title = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 8),
+      plot.margin = margin(5, 5, 5, 5)
+    )
+
+  # Add the plot to our list
+  plot_list[[vaccine]] <- p
+}
+# Determine grid dimensions for a roughly square layout
+n_plots <- length(plot_list)
+n_cols <- ceiling(sqrt(n_plots))
+n_rows <- ceiling(n_plots / n_cols)
+# Arrange all plots in a grid with shared axis titles
+combined_plot <- grid.arrange(
+  grobs = plot_list,
+  ncol = n_cols,
+  left = y_axis_title,
+  bottom = x_axis_title
+)
+# Display the grid of plots
+print(combined_plot)
+# Save the grid visualization
+ggsave("vaccine_coverage_trends.png", combined_plot, 
+       width = n_cols * 3 + 1, height = n_rows * 2.5 + 1, dpi = 300)
+```
+
+
+
+
+
+```{r}
+library(see)
+library(ggplot2)
+
+# Combine confidence interval results from 2010 to 2023
+all_ci_results <- rbind(ci_results_2010, ci_results_2011, ci_results_2012, ci_results_2013, ci_results_2014, ci_results_2015, ci_results_2016, ci_results_2017, ci_results_2018, ci_results_2019, ci_results_2020, ci_results_2021, ci_results_2022, ci_results_2023)
+
+# Create a single plot for all vaccines with confidence intervals
+
+p_confidence <- ggplot(all_ci_results, aes(x = Year, y = Mean, color = Vaccine, group = Vaccine)) +
+  # Add a light grid in the background
+  geom_rect(data = data.frame(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf),
+            aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            fill = "white", inherit.aes = FALSE) +
+  # Square grid with smaller cells
+  geom_vline(xintercept = seq(2010, 2023, by = 1), color = "gray90", linewidth = 0.3) +
+  geom_hline(yintercept = seq(0.5, 1, by = 0.05), color = "gray90", linewidth = 0.3) +
+  # Data layers
+  geom_point(size = 2) +
+  geom_line(size = 1) +
+  geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2) +
+  # Clear axis lines
+  geom_hline(yintercept = 0.5, color = "black", linewidth = 1) +  # Bottom axis line
+  geom_vline(xintercept = 2010, color = "black", linewidth = 1) +  # Left axis line
+  # Scales
+  scale_fill_okabeito() +
+  scale_y_continuous(limits = c(0.49, 1), breaks = seq(0.5, 1, by = 0.1)) +
+  scale_x_continuous(breaks = seq(2010, 2023, by = 1)) +
+  labs(title = "Vaccination Coverage Trends (2010-2023)",
+       y = "Proportion Vaccinated",
+       x = "Year",
+       color = "Vaccine") +
+  theme_minimal() +
+  theme(
+    # Explicitly set all grid elements to ensure no conflicts
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background= element_rect(fill= "white", color= NA),
+    # Darker axis elements
+    axis.line.x = element_line(color = "black", size = 1),
+    axis.line.y = element_line(color = "black", size = 1),
+    axis.ticks = element_line(color = "black", size = 0.8),
+    axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 9),
+    axis.text.y = element_text(color = "black", size = 9),
+    axis.title= element_text(color= "black", size= 11, face="bold")
+  )
+
+# For the save function, set explicit dimensions
+ggsave("coverage_trends_CI.png", p_confidence, width = 10, height = 8, dpi = 300)
+```
+
+
+
+
+
+```{r}
+# Keeping continuous lines with just a background shift for COVID-19
+p_covid_background <- ggplot(all_ci_results, aes(x = Year, y = Mean, color = Vaccine, group = Vaccine)) +
+  # Add a shaded background rectangle for the COVID-19 period
+  annotate("rect", xmin = 2019, xmax = max(all_ci_results$Year) + 0.5, 
+           ymin = 0.4, ymax = 1, 
+           fill = "lightcoral", alpha = 0.3) +
+  
+  # Add a vertical line at the COVID demarcation point
+  geom_vline(xintercept = 2019, linetype = "dashed", color = "gray5", size = 0.7) +
+  geom_vline(xintercept = 2020, linetype = "dashed", color = "royalblue", size = 0.5) +
+  
+  # Keep all your original geom elements exactly as they were
+  geom_point(size = 2.5) +  # Mean estimate points
+  geom_line(size = 1) +     # Line connecting points
+  
+  # Keep your confidence intervals (assuming you have them)
+  # If using geom_ribbon for confidence intervals, keep that here
+  # Example: geom_ribbon(aes(ymin = Lower, ymax = Upper, fill = Vaccine), alpha = 0.2) +
+  
+  # Add a COVID-19 label
+  annotate("text", x = 2019.7, y = 1.00, label = "COVID-19", 
+           hjust = 0, size = 3.5, fontface = "bold", color = "gray30") +
+  
+  scale_x_continuous(breaks = 2010:2023) +
+  scale_y_continuous(limits = c(0.40, 1), breaks = seq(0.40, 1, by = 0.10)) +
+  geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2) +
+  
+  labs(title = "Vaccination Coverage Trends (2010-2023)",
+       y = "Proportion Vaccinated",
+       x = "Year",
+       color = "Vaccine") +
+  
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA),
+    legend.background = element_rect(fill = "white", color = NA),
+    
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    axis.line = element_line(linewidth = 1.2, color = "black"),
+    axis.ticks = element_line(linewidth = 1.2, color = "black"),
+    
+    legend.position = "bottom"
+  )
+
+# Print the plot
+print(p_covid_background)
+
+# Save the plot
+ggsave("vaccination_trends_covid_background_withCI.png", plot = p_covid_background, width = 10, height = 7, dpi = 300)
+```
+
+
+```{r}
+library(see)
+library(ggplot2)
+# Combine confidence interval results from 2010 to 2023
+all_ci_results <- rbind(ci_results_2010, ci_results_2011, ci_results_2012, ci_results_2013, ci_results_2014, ci_results_2015, ci_results_2016, ci_results_2017, ci_results_2018, ci_results_2019, ci_results_2020, ci_results_2021, ci_results_2022, ci_results_2023)
+
+# Create a single plot for all vaccines with confidence intervals and COVID-19 demarcation
+p_confidence <- ggplot(all_ci_results, aes(x = Year, y = Mean, color = Vaccine, group = Vaccine)) +
+  # Add a light grid in the background
+  geom_rect(data = data.frame(xmin = -Inf, xmax = Inf, ymin = -Inf, ymax = Inf),
+            aes(xmin = xmin, xmax = xmax, ymin = ymin, ymax = ymax),
+            fill = "white", inherit.aes = FALSE) +
+            
+  # Add COVID-19 background demarcation - light rose color after 2019.5
+  annotate("rect", xmin = 2019.5, xmax = Inf, 
+           ymin = 0.49, ymax = 1, 
+           fill = "mistyrose", alpha = 0.3) +
+  
+  # Add COVID-19 vertical demarcation line
+  geom_vline(xintercept = 2019.5, linetype = "dashed", color = "gray50", size = 0.5) +
+  
+  # Add COVID-19 label
+  annotate("text", x = 2019.7, y = 0.95, label = "COVID-19", 
+           hjust = 0, size = 3.5, fontface = "bold", color = "gray30") +
+           
+  # Square grid with smaller cells
+  geom_vline(xintercept = seq(2010, 2023, by = 1), color = "gray90", linewidth = 0.3) +
+  geom_hline(yintercept = seq(0.5, 1, by = 0.05), color = "gray90", linewidth = 0.3) +
+  
+  # Data layers
+  geom_point(size = 2) +
+  geom_line(size = 1) +
+  geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2) +
+  
+  # Clear axis lines
+  geom_hline(yintercept = 0.5, color = "black", linewidth = 1) +  # Bottom axis line
+  geom_vline(xintercept = 2010, color = "black", linewidth = 1) +  # Left axis line
+  
+  # Scales
+  scale_fill_okabeito() +
+  scale_y_continuous(limits = c(0.49, 1), breaks = seq(0.5, 1, by = 0.1)) +
+  scale_x_continuous(breaks = seq(2010, 2023, by = 1)) +
+  
+  labs(title = "Vaccination Coverage Trends (2010-2023)",
+       subtitle = "Showing impact of COVID-19 pandemic",
+       y = "Proportion Vaccinated",
+       x = "Year",
+       color = "Vaccine") +
+       
+  theme_minimal() +
+  theme(
+    # Explicitly set all grid elements to ensure no conflicts
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),
+    # Darker axis elements
+    axis.line.x = element_line(color = "black", size = 1),
+    axis.line.y = element_line(color = "black", size = 1),
+    axis.ticks = element_line(color = "black", size = 0.8),
+    axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 9),
+    axis.text.y = element_text(color = "black", size = 9),
+    axis.title = element_text(color = "black", size = 11, face = "bold")
+  )
+
+# For the save function, set explicit dimensions
+ggsave("coverage_trends_CI_with_covid.png", p_confidence, width = 10, height = 8, dpi = 300)
+```
+
+
+
+
+```{r}
+
+library(ggplot2)
+
+plot_vaccine_trend <- function(year = NULL, vaccine_name = NULL) {
+  
+  # Print user instructions AFTER function execution
+  print("**************************************************************")
+  print("                VACCINATION TREND PLOTTER")
+  print("**************************************************************")
+  print("This function allows you to:")
+  print("1️⃣ View vaccination coverage for all vaccines in a single year.")
+  print("2️⃣ View vaccination trends for a single vaccine across multiple years (2018-2022).")
+  print("")
+  print("✅ Available Years: 2018, 2019, 2020, 2021, 2022")
+  print("✅ Available Vaccines:")
+  print("   - 'DTaP'       -> Diphtheria, Tetanus, Pertussis")
+  print("   - 'Polio'      -> Poliovirus")
+  print("   - 'MMR'        -> Measles, Mumps, Rubella")
+  print("   - 'Hib'        -> Haemophilus Influenzae Type B")
+  print("   - 'HepB'       -> Hepatitis B")
+  print("   - 'Varicella'  -> Chickenpox")
+  print("   - 'PCV'        -> Pneumococcal Conjugate Vaccine")
+  print("   - 'Influenza'  -> Flu Vaccine")
+  print("   - 'HepA'       -> Hepatitis A")
+  print("   - 'Rotavirus'  -> Rotavirus Vaccine")
+  print("")
+  print("💡 Example Usage: plot_vaccine_trend(year = 2018)") 
+  print("💡 Example Usage: plot_vaccine_trend(vaccine_name = 'DTaP')")
+  print("**************************************************************")
+
+  # 1️⃣ CASE: If a **specific year** is provided → Show all vaccines for that year
+  if (!is.null(year) && is.null(vaccine_name)) {
+    # Get the dataset for the selected year dynamically
+    dataset_name <- paste0("ci_results_", year)
+    
+    # Check if dataset exists
+    if (!exists(dataset_name)) {
+      print("❌ ERROR: The selected year does not have data. Please select from 2018 to 2022.")
+      return(NULL)
+    }
+    
+    ci_results_year <- get(dataset_name)  # Get dataset dynamically
+    print(paste("✅ Generating plot for all vaccines in", year, "..."))
+    
+    # Create a bar plot for all vaccines in the selected year
+    p <- ggplot(ci_results_year, aes(x = Vaccine, y = Mean, fill = as.factor(Vaccine))) +
+      geom_bar(stat = "identity", position = position_dodge(), width = 0.7) +  # Bar plot with different colors
+      ylim(0.6, 1) +  # Set y-axis limits
+      labs(title = paste("Vaccination Coverage in", year),
+           y = "Proportion Vaccinated",
+           x = "Vaccine",
+           fill = "Vaccine") +  # Legend title
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+    
+    print("✅ Plot successfully generated! Displaying now...")
+    print(p)
+    return()
+  }
+  
+  # 2️⃣ CASE: If a **specific vaccine** is provided → Show trends across years (2018-2022)
+  if (!is.null(vaccine_name) && is.null(year)) {
+    # Combine all years into one dataset
+    all_ci_results <- rbind(ci_results_2018, ci_results_2019, ci_results_2020, ci_results_2021, ci_results_2022)
+    
+    # Filter for the selected vaccine
+    vaccine_data <- subset(all_ci_results, Vaccine == vaccine_name)
+    
+    # Check if vaccine exists
+    if (nrow(vaccine_data) == 0) {
+      print("❌ ERROR: The vaccine name entered does not exist in the dataset. Please check and try again.")
+      return(NULL)
+    }
+    
+    print(paste("✅ Generating plot for", vaccine_name, "coverage trends (2018-2022)..."))
+
+    # Create the line plot for vaccine trends over multiple years
+    p <- ggplot(vaccine_data, aes(x = Year, y = Mean, group = Vaccine, color = Vaccine)) +
+      geom_point(size = 3) +  # Mean estimate points
+      geom_line(size = 1) +   # Line connecting points
+      ylim(0.6, 1) +  # Set y-axis limits
+      labs(title = paste(vaccine_name, "Coverage Trends (2018-2022)"),
+           y = "Proportion Vaccinated",
+           x = "Year",
+           color = "Vaccine") +  # Legend title
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+    
+    print("✅ Plot successfully generated! Displaying now...")
+    print(p)
+    return()
+  }
+  
+  # 3️⃣ CASE: If both inputs are missing → Show an error
+  print("❌ ERROR: Please provide either a year (e.g., `year = 2018`) OR a vaccine name (e.g., `vaccine_name = 'DTaP'`).")
+}
+
+
+```
+
+
+
+
+```{r}
+
+plot_vaccine_trend(v = "MMR")   # MMR trend over 2018-2022
+
+
+
+
+
+
+```
+
+```{r}
+# Add debugging to print some dataset information
+# Uncomment this block if you need to debug variable names or data types
+# print_dataset_info <- function(dataset_name, dataset) {
+#   cat("\nDataset:", dataset_name, "\n")
+#   cat("Variables:", head(names(dataset)), "...\n")
+#   cat("AGEGRP exists:", "AGEGRP" %in% names(dataset), "\n")
+#   cat("PDAT exists:", "PDAT" %in% names(dataset), "\n")
+#   
+#   if ("AGEGRP" %in% names(dataset)) {
+#     cat("AGEGRP class:", class(dataset$AGEGRP), "\n")
+#     cat("AGEGRP unique values:", unique(dataset$AGEGRP), "\n")
+#   }
+#   
+#   if ("PDAT" %in% names(dataset)) {
+#     cat("PDAT class:", class(dataset$PDAT), "\n")
+#     cat("PDAT unique values:", unique(dataset$PDAT), "\n")
+#   }
+# }
+# 
+# for (i in 1:length(datasets)) {
+#   print_dataset_info(paste("Year", datasets[[i]]$year), datasets[[i]]$data)
+# }
+# Required packages
+library(ggplot2)
+library(dplyr)
+library(tidyr)  # For complete() function
+library(purrr)
+library(rlang) # For .data pronoun
+
+# Create a function to process each dataset
+process_dataset <- function(data, year) {
+  # Check if AGEGRP variable exists
+  if (!"AGEGRP" %in% names(data)) {
+    message(paste("AGEGRP variable not found in dataset for year", year))
+    return(data.frame(age_group = character(), PDAT = numeric(), 
+                     count = numeric(), percentage = numeric(), year = numeric()))
+  }
+  
+  # Convert AGEGRP to integer if it's not already
+  data$AGEGRP <- as.integer(data$AGEGRP)
+  
+  # Map AGEGRP integer values to age group labels
+  data <- data %>%
+    mutate(
+      age_group = case_when(
+        AGEGRP == 1L ~ "19-23",
+        AGEGRP == 2L ~ "24-29",
+        AGEGRP == 3L ~ "30-35",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    filter(!is.na(age_group), !is.na(PDAT))
+    
+  # Convert PDAT to integer if needed
+  data$PDAT <- as.integer(data$PDAT)
+  
+  # Calculate percentages by age group and PDAT status
+  result <- data %>%
+    group_by(age_group, PDAT) %>%
+    summarise(count = n(), .groups = "drop") %>%
+    group_by(age_group) %>%
+    mutate(total = sum(count),
+           percentage = (count / total) * 100) %>%
+    select(age_group, PDAT, count, percentage) %>%
+    mutate(year = year)
+  
+  return(result)
+}
+
+# List of dataset names in the order they were loaded
+datasets <- list(
+  list(data = NISPUF10, year = 2010),
+  list(data = NISPUF11, year = 2011),
+  list(data = NISPUF12, year = 2012),
+  list(data = NISPUF13, year = 2013),
+  list(data = NISPUF14, year = 2014),
+  list(data = NISPUF15, year = 2015),
+  list(data = NISPUF16, year = 2016),
+  list(data = NISPUF17, year = 2017),
+  list(data = NISPUF18, year = 2018),
+  list(data = NISPUF19, year = 2019),
+  list(data = NISPUF20, year = 2020),
+  list(data = NISPUF21, year = 2021),
+  list(data = NISPUF22, year = 2022),
+  list(data = NISPUF23, year = 2023)
+)
+
+# Process all datasets and combine results
+all_results <- map_dfr(datasets, function(dataset_info) {
+  # Check if dataset has the required variable PDAT
+  if (!"PDAT" %in% names(dataset_info$data)) {
+    message(paste("PDAT variable not found in dataset for year", dataset_info$year))
+    return(data.frame(age_group = character(), PDAT = numeric(), 
+                     count = numeric(), percentage = numeric(), year = numeric()))
+  }
+  
+  result <- process_dataset(dataset_info$data, dataset_info$year)
+  return(result)
+})
+
+# Reshape data for visualization
+plot_data <- all_results %>%
+  filter(PDAT %in% c(2L, 1L)) %>%  # Use integer literals
+  mutate(PDAT_status = ifelse(PDAT == 1L, "Vaccination Reported", "Insufficient Data"))
+
+# Create line graphs for each age group showing PDAT=0 and PDAT=1 counts
+# First, make sure we have both PDAT statuses represented in the data
+all_years <- unique(plot_data$year)
+all_age_groups <- unique(plot_data$age_group)
+all_pdat_statuses <- unique(plot_data$PDAT_status)
+
+# Manually create a complete grid of all combinations
+plot_data_complete <- expand.grid(
+  year = all_years,
+  age_group = all_age_groups,
+  PDAT_status = all_pdat_statuses,
+  stringsAsFactors = FALSE
+) %>%
+  left_join(plot_data, by = c("year", "age_group", "PDAT_status")) %>%
+  mutate(count = ifelse(is.na(count), 0, count),
+         percentage = ifelse(is.na(percentage), 0, percentage))
+# First, create the basic plot
+plot1 <- ggplot(plot_data_complete, aes(x = year, y = count, color = PDAT_status, group = PDAT_status)) +
+  scale_x_continuous(breaks = seq(2010, 2023, by=3)) +
+  # Add COVID-19 background demarcation
+  annotate("rect", xmin = 2019, xmax = max(plot_data_complete$year) + 0.5, 
+           ymin = -Inf, ymax = Inf, 
+           fill = "indianred", alpha = 0.3) +
+  
+  # Add COVID-19 vertical demarcation lines
+  geom_vline(xintercept = 2019, linetype = "dashed", color = "grey5", size = 0.5) +
+  geom_vline(xintercept = 2020, linetype = "dashed", color = "royalblue", size = 0.5) +
+   
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  
+  # Create facets with independent scales
+  facet_wrap(~age_group, ncol = 3, scales = "free_y") +
+  
+  labs(
+    title = "Vaccination Reporting Status by Age Group Over Time",
+    subtitle = "Vaccination Reporting by Age Group: Pre and Post COVID-19)",
+    x = "Year",
+    y = "Number of Children",
+    color = "Reporting Status"
+  ) +
+  
+  # Use a base theme with borders
+  theme_bw() +
+  
+  # Now customize the theme elements
+  theme(
+    # Basic settings
+    legend.position = "bottom",
+    panel.grid = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),
+    
+    # This is the key: add ONLY left and bottom borders
+    panel.border = element_blank(),
+    panel.spacing = unit(1, "lines"),
+    
+    # Draw only left and bottom lines for each panel
+    axis.line.x = element_line(color = "black", size = 0.8),
+    axis.line.y = element_line(color = "black", size = 0.8),
+    
+    # Formatting for other elements
+    axis.ticks = element_line(color = "black", size = 0.8),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5, color = "black", size = 9),
+    axis.text.y = element_text(color = "black", size = 9),
+    axis.title = element_text(color = "black", size = 11, face = "bold"),
+    strip.text = element_text(face = "bold", size = 12),
+    strip.background = element_rect(fill = "white", color = NA)
+  ) +
+  
+  scale_color_manual(values = c("Vaccination Reported" = "forestgreen", "Insufficient Data" = "firebrick"))
+# Modify plot2 - Adding COVID-19 demarcation to the age groups comparison plot
+plot2 <- ggplot(plot2_data, aes(x = year, y = count, color = age_group, group = age_group)) +
+  # Add COVID-19 background demarcation
+  annotate("rect", xmin = 2019, xmax = max(plot2_data$year) + 0.5, 
+           ymin = -Inf, ymax = Inf, 
+           fill = "indianred", alpha = 0.3) +
+  
+  # Add COVID-19 vertical demarcation line
+  geom_vline(xintercept = 2019, linetype = "dashed", color = "grey5", size = 0.5) +
+  geom_vline(xintercept = 2020, linetype = "dashed", color = "royalblue", size = 0.5) +
+  # Add COVID-19 label at the top of the graph
+  annotate("text", x = 2019.7, y = max(plot2_data$count) * 1.10, 
+           label = "COVID-19", hjust = 0, size = 3.5, 
+           fontface = "bold", color = "gray30") +
+  
+  geom_line(linewidth = 1) +
+  geom_point(size = 2) +
+  scale_x_continuous(breaks = seq(2010, 2023, by=1)) +
+  labs(
+    title = "Children with Reported Vaccination Data (PDAT=1) by Age Group",
+    subtitle = "Comparing vaccination reporting across ages over time (Post- COVID-19 period highlighted)",
+    x = "Year",
+    y = "Number of Children",
+    color = "Age Group (months)"
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),
+    # Darker axis elements
+    axis.line.x = element_line(color = "black", size = 1),
+    axis.line.y = element_line(color = "black", size = 1),
+    axis.ticks = element_line(color = "black", size = 0.8),
+    axis.text.x = element_text(angle = 45, hjust = 1, color = "black", size = 9),
+    axis.text.y = element_text(color = "black", size = 9),
+    axis.title = element_text(color = "black", size = 11, face = "bold")
+  ) +
+  scale_color_brewer(palette = "Set1")
+
+# Display the plots
+print(plot1)
+print(plot2)
+
+# Save plots
+ggsave("vaccination_status_by_age_count_covid2.png", plot1, width = 12, height = 6)
+ggsave("vaccination_reported_by_age_group_covid1.png", plot2, width = 10, height = 6)
+```
+
+
+
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(ggplot2)
+library(survey)
+
+# Process one year at a time
+process_single_year <- function(year) {
+  # Get the two-digit year code
+  year_code <- substr(as.character(year), 3, 4)
+  
+  # Get dataset and survey design for this year
+  df_name <- paste0("df", year_code, "2")
+  design_name <- paste0("nis_design", year_code)
+  
+  # Skip if objects don't exist
+  if (!exists(df_name) || !exists(design_name)) {
+    cat("Skipping year", year, "- objects not found\n")
+    return(NULL)
+  }
+  
+  cat("Processing year", year, "\n")
+  
+  # Get objects
+  df <- get(df_name)
+  design <- get(design_name)
+  
+  # Add vaccination category and region columns directly to the survey design's data
+  design$variables$total_vaccines <- with(design$variables, 
+                                         P_NUMDTP + P_NUMHEP + P_NUMHIB + P_NUMMMR + P_NUMPOL + P_NUMVRC)
+  
+  design$variables$vaccine_category <- with(design$variables, 
+                                          ifelse(is.na(total_vaccines), "NA",
+                                          ifelse(total_vaccines == 0, "0",
+                                          ifelse(total_vaccines == 1, "1",
+                                          ifelse(total_vaccines == 2, "2", "3+")))))
+  
+  design$variables$region <- with(design$variables,
+                                ifelse(CEN_REG == 1, "NORTHEAST",
+                                ifelse(CEN_REG == 2, "MIDWEST",
+                                ifelse(CEN_REG == 3, "SOUTH",
+                                ifelse(CEN_REG == 4, "WEST", "NA")))))
+  
+  # Create all combinations of region and vaccine category
+  all_combinations <- expand.grid(
+    region = c("NORTHEAST", "MIDWEST", "SOUTH", "WEST"),
+    vaccine_category = c("0", "1", "2", "3+", "NA")
+  )
+  
+  # Initialize results
+  results <- all_combinations
+  results$YEAR <- year
+  results$count <- 0
+  
+  # Get weighted counts for each combination
+  for (i in 1:nrow(all_combinations)) {
+    current_region <- as.character(all_combinations$region[i])
+    current_category <- as.character(all_combinations$vaccine_category[i])
+    
+    # Create a formula for subsetting
+    subset_formula <- paste0("region == '", current_region, "' & vaccine_category == '", current_category, "'")
+    
+    # Try to get the weighted count
+    tryCatch({
+      # Use svytotal for proper survey estimation
+      count_result <- svytotal(~I(1), subset(design, as.formula(paste0("~", subset_formula))))
+      results$count[i] <- as.numeric(count_result)
+    }, error = function(e) {
+      # If there's an error, leave count as 0
+      cat("  Error for", current_region, current_category, ":", conditionMessage(e), "\n")
+    })
+  }
+  
+  return(results)
+}
+
+# Process all years
+process_all_years <- function(start_year = 2010, end_year = 2023) {
+  all_results <- data.frame()
+  
+  for (year in start_year:end_year) {
+    year_results <- process_single_year(year)
+    
+    if (!is.null(year_results)) {
+      all_results <- rbind(all_results, year_results)
+    }
+  }
+  
+  return(all_results)
+}
+
+# Create the visualization
+create_vaccination_plot <- function(data) {
+  # Convert vaccine_category to factor with specified order
+  data$vaccine_category <- factor(data$vaccine_category, 
+                                 levels = c("0", "1", "2", "3+", "NA"))
+  
+  # Create the plot
+  ggplot(data, aes(x = YEAR, y = count, color = vaccine_category, group = vaccine_category)) +
+    geom_line(size = 1) +
+    facet_wrap(~ region, scales = "free_y", ncol = 2) +
+    scale_color_manual(
+      values = c("0" = "#FF8884", "1" = "#82CA9D", "2" = "#8884D8", "3+" = "#FEBB4A", "NA" = "#A0A0A0"),
+      name = "Category"
+    )  +
+    labs(
+      title = "Number of Children Aged 19-35 Months per Vaccination Category and Census Region",
+      x = "Year",
+      y = "Weighted Count"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 12, face = "bold"),
+      axis.title = element_text(size = 10),
+      strip.background = element_rect(fill = "lightgray"),
+      strip.text = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+}
+
+# Main function
+main <- function() {
+  # Process all years
+  cat("Starting processing...\n")
+  results <- process_all_years()
+  
+  # Check if we have results
+  if (nrow(results) == 0) {
+    cat("No results were generated.\n")
+    return(NULL)
+  }
+  
+  cat("Creating plot...\n")
+  # Create the plot
+  vaccination_plot <- create_vaccination_plot(results)
+  print(vaccination_plot)
+  
+  # Save the plot
+  ggsave("vaccination_by_region.png", vaccination_plot, width = 10, height = 8, dpi = 300)
+  
+  return(results)
+}
+
+# Run the main function
+results <- main()
+```
+
+
+
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(ggplot2)
+
+# Process one year of data with correct vaccine counting
+process_single_year <- function(year) {
+  # Get the two-digit year code
+  year_code <- substr(as.character(year), 3, 4)
+  
+  # Get dataset name
+  df_name <- paste0("df", year_code, "2")
+  
+  # Skip if dataset doesn't exist
+  if (!exists(df_name)) {
+    cat("Skipping year", year, "- dataset not found\n")
+    return(NULL)
+  }
+  
+  cat("Processing year", year, "\n")
+  
+  # Get the dataset
+  df <- get(df_name)
+  
+  # Find the appropriate weight variable
+  if ("PROVWT" %in% names(df)) {
+    weight_var <- "PROVWT"
+  } else if ("PROVWT_C" %in% names(df)) {
+    weight_var <- "PROVWT_C"
+  } else {
+    # Find any weight variable
+    possible_weights <- grep("^PROVWT", names(df), value = TRUE)
+    if (length(possible_weights) > 0) {
+      weight_var <- possible_weights[1]
+    } else {
+      cat("Warning: No weight variable found for", year, "\n")
+      return(NULL)
+    }
+  }
+  
+  # Step 1: Count vaccines properly - count types where sufficient doses received
+  # Initialize count of vaccines properly received
+  df$vaccine_count <- 0
+  
+  # Check if each vaccine was received to recommended level
+  # For DTP (4+ doses)
+  if ("P_UTDTP4" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDTP4 == 1)
+  } else if ("P_UTD431" %in% names(df)) {
+    # Alternative variable that indicates 4+ DTP doses
+    df$vaccine_count <- df$vaccine_count + (df$P_UTD431 == 1)
+  }
+  
+  # For Polio (3+ doses)
+  if ("P_UTDPOL" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDPOL == 1)
+  }
+  
+  # For MMR (1+ dose)
+  if ("P_UTDMCV" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDMCV == 1)
+  } else if ("P_UTDMMX" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDMMX == 1)
+  }
+  
+  # For Hib (3+ doses)
+  if ("P_UTDHIB" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDHIB == 1)
+  }
+  
+  # For Hepatitis B (3+ doses)
+  if ("P_UTDHEP" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDHEP == 1)
+  }
+  
+  # For Varicella (1+ dose)
+  if ("P_U12VRC" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_U12VRC == 1)
+  } else if ("P_NUMVRC" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_NUMVRC >= 1)
+  }
+  
+  # For PCV (4+ doses)
+  if ("P_UTDPCV" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDPCV == 1)
+  } else if ("P_UTDPC3" %in% names(df)) {
+    # Alternative variable that indicates 3+ PCV doses
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDPC3 == 1)
+  }
+  
+  # For Hepatitis A (2+ doses)
+  if ("P_UTDHEPA2" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDHEPA2 == 1)
+  }
+  
+  # For Rotavirus
+  if ("P_UTDROT_S" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDROT_S == 1)
+  } else if ("P_NUMROT" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_NUMROT >= 2)  # Assuming 2+ doses is sufficient
+  }
+  
+  # Print distribution of vaccine_count
+  cat("Distribution of properly received vaccines:\n")
+  print(table(df$vaccine_count, useNA = "always"))
+  
+  # Step 2: Create categories based on vaccine count
+  df$vaccine_category <- NA_character_
+  df$vaccine_category[is.na(df$vaccine_count)] <- "NA"
+  df$vaccine_category[!is.na(df$vaccine_count) & df$vaccine_count == 0] <- "0"
+  df$vaccine_category[!is.na(df$vaccine_count) & df$vaccine_count == 1] <- "1"
+  df$vaccine_category[!is.na(df$vaccine_count) & df$vaccine_count == 2] <- "2"
+  df$vaccine_category[!is.na(df$vaccine_count) & df$vaccine_count >= 3] <- "3+"
+  
+  # Step 3: Assign regions
+  df$region <- NA_character_
+  df$region[df$CEN_REG == 1] <- "NORTHEAST"
+  df$region[df$CEN_REG == 2] <- "MIDWEST"
+  df$region[df$CEN_REG == 3] <- "SOUTH"
+  df$region[df$CEN_REG == 4] <- "WEST"
+  
+  # Step 4: Calculate weighted counts
+  results <- expand.grid(
+    region = c("NORTHEAST", "MIDWEST", "SOUTH", "WEST"),
+    vaccine_category = c("0", "1", "2", "3+", "NA"),
+    YEAR = year,
+    count = 0
+  )
+  
+  # For each combination
+  for (i in 1:nrow(results)) {
+    r <- as.character(results$region[i])
+    v <- as.character(results$vaccine_category[i])
+    
+    # Get the subset of data
+    subset_df <- df[df$region == r & df$vaccine_category == v, ]
+    
+    # Calculate weighted count if we have data
+    if (nrow(subset_df) > 0) {
+      results$count[i] <- sum(subset_df[[weight_var]], na.rm = TRUE)
+    }
+  }
+  
+  return(results)
+}
+
+# Process all years
+process_all_years <- function(start_year = 2010, end_year = 2023) {
+  all_results <- data.frame()
+  
+  for (year in start_year:end_year) {
+    year_results <- process_single_year(year)
+    
+    if (!is.null(year_results)) {
+      all_results <- rbind(all_results, year_results)
+    }
+  }
+  
+  return(all_results)
+}
+
+# Create two visualizations - one for all categories and one for just the smaller categories
+create_vaccination_plots <- function(data) {
+  # Convert vaccine_category to factor with specified order
+  data$vaccine_category <- factor(data$vaccine_category, 
+                                 levels = c("0", "1", "2", "3+", "NA"))
+  
+  # Define consistent colors for all plots
+  category_colors <- c("0" = "#FF8884", "1" = "#82CA9D", "2" = "#8884D8", "3+" = "#FEBB4A", "NA" = "#A0A0A0")
+  
+  # Create the plot with all categories
+  main_plot <- ggplot(data, aes(x = YEAR, y = count, color = vaccine_category, group = vaccine_category)) +
+    geom_line(size = 1) +
+    facet_wrap(~ region, scales = "free_y", ncol = 2) +
+    scale_color_manual(values = category_colors, name = "Category") +
+    labs(
+      title = "Number of Children Aged 19-35 Months per Vaccination Category and Census Region",
+      subtitle = "Categories based on number of vaccine types received to recommended levels",
+      x = "Year",
+      y = "Weighted Count"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 10),
+      axis.title = element_text(size = 10),
+      strip.background = element_rect(fill = "lightgray"),
+      strip.text = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+  
+  # Create a second plot focusing only on categories 0, 1, 2, and NA
+  # Filter out the "3+" category which is likely dominating the scale
+  focused_data <- data[data$vaccine_category != "3+", ]
+  
+  focused_plot <- ggplot(focused_data, aes(x = YEAR, y = count, color = vaccine_category, group = vaccine_category)) +
+    geom_line(size = 1) +
+    facet_wrap(~ region, scales = "free_y", ncol = 2) +
+    scale_color_manual(values = category_colors[names(category_colors) != "3+"], name = "Category") +
+    labs(
+      title = "Number of Children with 0, 1, or 2 Vaccines by Census Region",
+      subtitle = "Focused view without the 3+ category to better see smaller counts",
+      x = "Year",
+      y = "Weighted Count"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 10),
+      axis.title = element_text(size = 10),
+      strip.background = element_rect(fill = "lightgray"),
+      strip.text = element_text(face = "bold"),
+      legend.position = "bottom"
+    )
+  
+  # Return both plots as a list
+  return(list(main_plot = main_plot, focused_plot = focused_plot))
+}
+
+# Main function
+main <- function() {
+  # Process all years
+  cat("Starting processing...\n")
+  results <- process_all_years()
+  
+  # Check if we have results
+  if (nrow(results) == 0) {
+    cat("No results were generated.\n")
+    return(NULL)
+  }
+  
+  cat("Creating plots...\n")
+  # Create the plots
+  plots <- create_vaccination_plots(results)
+  
+  # Print and save both plots
+  print(plots$main_plot)
+  ggsave("vaccination_by_region_all.png", plots$main_plot, width = 10, height = 8, dpi = 300)
+  
+  print(plots$focused_plot)
+  ggsave("vaccination_by_region_focused.png", plots$focused_plot, width = 10, height = 8, dpi = 300)
+  
+  return(results)
+}
+
+# Run the main function
+results <- main()
+```
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(ggplot2)
+
+# Process one year of data to calculate mean vaccines per child
+process_single_year <- function(year) {
+  # Get the two-digit year code
+  year_code <- substr(as.character(year), 3, 4)
+  
+  # Get dataset name
+  df_name <- paste0("df", year_code, "2")
+  
+  # Skip if dataset doesn't exist
+  if (!exists(df_name)) {
+    cat("Skipping year", year, "- dataset not found\n")
+    return(NULL)
+  }
+  
+  cat("Processing year", year, "\n")
+  
+  # Get the dataset
+  df <- get(df_name)
+  
+  # Find the appropriate weight variable
+  if ("PROVWT" %in% names(df)) {
+    weight_var <- "PROVWT"
+  } else if ("PROVWT_C" %in% names(df)) {
+    weight_var <- "PROVWT_C"
+  } else {
+    # Find any weight variable
+    possible_weights <- grep("^PROVWT", names(df), value = TRUE)
+    if (length(possible_weights) > 0) {
+      weight_var <- possible_weights[1]
+    } else {
+      cat("Warning: No weight variable found for", year, "\n")
+      return(NULL)
+    }
+  }
+  
+  # Step 1: Count vaccines properly - count types where sufficient doses received
+  # Initialize count of vaccines properly received
+  df$vaccine_count <- 0
+  
+  # Check if each vaccine was received to recommended level
+  # For DTP (4+ doses)
+  if ("P_UTDTP4" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDTP4 == 1)
+  } else if ("P_UTD431" %in% names(df)) {
+    # Alternative variable that indicates 4+ DTP doses
+    df$vaccine_count <- df$vaccine_count + (df$P_UTD431 == 1)
+  }
+  
+  # For Polio (3+ doses)
+  if ("P_UTDPOL" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDPOL == 1)
+  }
+  
+  # For MMR (1+ dose)
+  if ("P_UTDMCV" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDMCV == 1)
+  } else if ("P_UTDMMX" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDMMX == 1)
+  }
+  
+  # For Hib (3+ doses)
+  if ("P_UTDHIB" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDHIB == 1)
+  }
+  
+  # For Hepatitis B (3+ doses)
+  if ("P_UTDHEP" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDHEP == 1)
+  }
+  
+  # For Varicella (1+ dose)
+  if ("P_U12VRC" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_U12VRC == 1)
+  } else if ("P_NUMVRC" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_NUMVRC >= 1)
+  }
+  
+  # For PCV (4+ doses)
+  if ("P_UTDPCV" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDPCV == 1)
+  } else if ("P_UTDPC3" %in% names(df)) {
+    # Alternative variable that indicates 3+ PCV doses
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDPC3 == 1)
+  }
+  
+  # For Hepatitis A (2+ doses)
+  if ("P_UTDHEPA2" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDHEPA2 == 1)
+  }
+  
+  # For Rotavirus
+  if ("P_UTDROT_S" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDROT_S == 1)
+  } else if ("P_NUMROT" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_NUMROT >= 2)  # Assuming 2+ doses is sufficient
+  }
+  
+  # For Influenza
+  if ("P_UTDFL1" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDFL1 == 1)
+  } else if ("P_NUMFLU" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_NUMFLU >= 1)
+  }
+  
+  # Print distribution of vaccine_count
+  cat("Distribution of properly received vaccines:\n")
+  print(table(df$vaccine_count, useNA = "always"))
+  
+  # Step 2: Assign regions
+  df$region <- NA_character_
+  df$region[df$CEN_REG == 1] <- "NORTHEAST"
+  df$region[df$CEN_REG == 2] <- "MIDWEST"
+  df$region[df$CEN_REG == 3] <- "SOUTH"
+  df$region[df$CEN_REG == 4] <- "WEST"
+  
+  # Step 3: Calculate weighted mean vaccine count by region
+  region_results <- data.frame()
+  
+  for (r in c("NORTHEAST", "MIDWEST", "SOUTH", "WEST")) {
+    # Get subset for this region
+    subset_df <- df[df$region == r, ]
+    
+    if (nrow(subset_df) > 0) {
+      # Calculate weighted mean
+      weighted_sum <- sum(subset_df$vaccine_count * subset_df[[weight_var]], na.rm = TRUE)
+      total_weights <- sum(subset_df[[weight_var]], na.rm = TRUE)
+      weighted_mean <- weighted_sum / total_weights
+      
+      # Add to results
+      region_results <- rbind(region_results, data.frame(
+        region = r,
+        year = year,
+        mean_vaccines = weighted_mean,
+        total_children = total_weights
+      ))
+    }
+  }
+  
+  # Step 4: Also calculate national average
+  weighted_sum <- sum(df$vaccine_count * df[[weight_var]], na.rm = TRUE)
+  total_weights <- sum(df[[weight_var]], na.rm = TRUE)
+  weighted_mean <- weighted_sum / total_weights
+  
+  region_results <- rbind(region_results, data.frame(
+    region = "NATIONAL",
+    year = year,
+    mean_vaccines = weighted_mean,
+    total_children = total_weights
+  ))
+  
+  return(region_results)
+}
+
+# Process all years
+process_all_years <- function(start_year = 2010, end_year = 2023) {
+  all_results <- data.frame()
+  
+  for (year in start_year:end_year) {
+    year_results <- process_single_year(year)
+    
+    if (!is.null(year_results)) {
+      all_results <- rbind(all_results, year_results)
+    }
+  }
+  
+  return(all_results)
+}
+
+# Create mean vaccines visualization
+create_mean_vaccines_plot <- function(data) {
+  data$year <-as.numeric(as.character(data$year))
+  years_available <- sort(unique(data$year))
+  cat("Years available in the data:", paste(years_available, collapse=", "), "\n")
+  # Create the plot
+  mean_plot <- ggplot(data, aes(x = year, y = mean_vaccines, color = region, group = region)) +
+    geom_line(size = 1) +
+    geom_point(size = 2) +
+    scale_color_brewer(palette = "Set1") +
+    scale_x_continuous(breaks= years_available, labels= years_available, minor_breaks= NULL) +
+    labs(
+      title = "Mean Number of Vaccines Received by Children Aged 19-35 Months",
+      subtitle = "Based on recommended doses for each vaccine type",
+      x = "Year",
+      y = "Mean Number of Vaccines",
+      color = "Region"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 10),
+      axis.title = element_text(size = 10),
+      legend.position = "bottom"
+    )
+  
+  return(mean_plot)
+}
+
+# Create total children visualization
+create_total_children_plot <- function(data) {
+  # Exclude NATIONAL category to avoid double-counting
+  data_regional <- data[data$region != "NATIONAL", ]
+  
+  # Create the plot
+  total_plot <- ggplot(data_regional, aes(x = year, y = total_children, fill = region)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    scale_fill_brewer(palette = "Set1") +
+    labs(
+      title = "Total Children Aged 19-35 Months by Region",
+      subtitle = "Based on weighted survey data",
+      x = "Year",
+      y = "Weighted Total Children",
+      fill = "Region"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 12, face = "bold"),
+      plot.subtitle = element_text(size = 10),
+      axis.title = element_text(size = 10),
+      legend.position = "bottom"
+    )
+  
+  return(total_plot)
+}
+
+# Main function
+main <- function() {
+  # Process all years
+  cat("Starting processing...\n")
+  results <- process_all_years()
+  
+  # Check if we have results
+  if (nrow(results) == 0) {
+    cat("No results were generated.\n")
+    return(NULL)
+  }
+  
+  cat("Creating mean vaccines plot...\n")
+  # Create the mean vaccines plot
+  mean_plot <- create_mean_vaccines_plot(results)
+  print(mean_plot)
+  ggsave("mean_vaccines_by_region.png", mean_plot, width = 10, height = 6, dpi = 300)
+  
+  cat("Creating total children plot...\n")
+  # Create the total children plot
+  total_plot <- create_total_children_plot(results)
+  print(total_plot)
+  ggsave("total_children_by_region.png", total_plot, width = 10, height = 6, dpi = 300)
+  
+  return(results)
+}
+
+# Run the main function
+results <- main()
+```
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(ggplot2)
+
+# Process one year of data with correct vaccine counting
+process_single_year <- function(year) {
+  # Get the two-digit year code
+  year_code <- substr(as.character(year), 3, 4)
+  
+  # Get dataset name
+  df_name <- paste0("df", year_code, "2")
+  
+  # Skip if dataset doesn't exist
+  if (!exists(df_name)) {
+    cat("Skipping year", year, "- dataset not found\n")
+    return(NULL)
+  }
+  
+  cat("Processing year", year, "\n")
+  
+  # Get the dataset
+  df <- get(df_name)
+  
+  # Find the appropriate weight variable
+  if ("PROVWT" %in% names(df)) {
+    weight_var <- "PROVWT"
+  } else if ("PROVWT_C" %in% names(df)) {
+    weight_var <- "PROVWT_C"
+  } else {
+    # Find any weight variable
+    possible_weights <- grep("^PROVWT", names(df), value = TRUE)
+    if (length(possible_weights) > 0) {
+      weight_var <- possible_weights[1]
+    } else {
+      cat("Warning: No weight variable found for", year, "\n")
+      return(NULL)
+    }
+  }
+  
+  # Step 1: Count vaccines properly - count types where sufficient doses received
+  # Initialize count of vaccines properly received
+  df$vaccine_count <- 0
+  
+  # Check if each vaccine was received to recommended level
+  # For DTP (4+ doses)
+  if ("P_UTDTP4" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDTP4 == 1)
+  } else if ("P_UTD431" %in% names(df)) {
+    # Alternative variable that indicates 4+ DTP doses
+    df$vaccine_count <- df$vaccine_count + (df$P_UTD431 == 1)
+  }
+  
+  # For Polio (3+ doses)
+  if ("P_UTDPOL" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDPOL == 1)
+  }
+  
+  # For MMR (1+ dose)
+  if ("P_UTDMCV" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDMCV == 1)
+  } else if ("P_UTDMMX" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDMMX == 1)
+  }
+  
+  # For Hib (3+ doses)
+  if ("P_UTDHIB" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDHIB == 1)
+  }
+  
+  # For Hepatitis B (3+ doses)
+  if ("P_UTDHEP" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDHEP == 1)
+  }
+  
+  # For Varicella (1+ dose)
+  if ("P_U12VRC" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_U12VRC == 1)
+  } else if ("P_NUMVRC" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_NUMVRC >= 1)
+  }
+  
+  # For PCV (4+ doses)
+  if ("P_UTDPCV" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDPCV == 1)
+  } else if ("P_UTDPC3" %in% names(df)) {
+    # Alternative variable that indicates 3+ PCV doses
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDPC3 == 1)
+  }
+  
+  # For Hepatitis A (2+ doses)
+  if ("P_UTDHEPA2" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDHEPA2 == 1)
+  }
+  
+  # For Rotavirus
+  if ("P_UTDROT_S" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_UTDROT_S == 1)
+  } else if ("P_NUMROT" %in% names(df)) {
+    df$vaccine_count <- df$vaccine_count + (df$P_NUMROT >= 2)  # Assuming 2+ doses is sufficient
+  }
+  
+  # Print distribution of vaccine_count
+  cat("Distribution of properly received vaccines:\n")
+  print(table(df$vaccine_count, useNA = "always"))
+  
+  # Step 2: Create categories based on vaccine count
+  df$vaccine_category <- NA_character_
+  df$vaccine_category[is.na(df$vaccine_count)] <- "NA"
+  df$vaccine_category[!is.na(df$vaccine_count) & df$vaccine_count == 0] <- "0"
+  df$vaccine_category[!is.na(df$vaccine_count) & df$vaccine_count >= 1 & df$vaccine_count <= 4] <- "1-4"
+  df$vaccine_category[!is.na(df$vaccine_count) & df$vaccine_count >= 5 & df$vaccine_count <= 7] <- "5-7"
+  df$vaccine_category[!is.na(df$vaccine_count) & df$vaccine_count >= 8] <- "8+"
+  
+  # Step 3: Assign regions
+  df$region <- NA_character_
+  df$region[df$CEN_REG == 1] <- "NORTHEAST"
+  df$region[df$CEN_REG == 2] <- "MIDWEST"
+  df$region[df$CEN_REG == 3] <- "SOUTH"
+  df$region[df$CEN_REG == 4] <- "WEST"
+  
+  # Step 4: Calculate weighted counts
+  results <- expand.grid(
+    region = c("NORTHEAST", "MIDWEST", "SOUTH", "WEST"),
+    vaccine_category = c("0", "1-4", "5-7", "8+", "NA"),
+    YEAR = year,
+    count = 0
+  )
+  
+  # For each combination
+  for (i in 1:nrow(results)) {
+    r <- as.character(results$region[i])
+    v <- as.character(results$vaccine_category[i])
+    
+    # Get the subset of data
+    subset_df <- df[df$region == r & df$vaccine_category == v, ]
+    
+    # Calculate weighted count if we have data
+    if (nrow(subset_df) > 0) {
+      results$count[i] <- sum(subset_df[[weight_var]], na.rm = TRUE)
+    }
+  }
+  
+  return(results)
+}
+
+# Process all years
+process_all_years <- function(start_year = 2010, end_year = 2023) {
+  all_results <- data.frame()
+  
+  for (year in start_year:end_year) {
+    year_results <- process_single_year(year)
+    
+    if (!is.null(year_results)) {
+      all_results <- rbind(all_results, year_results)
+    }
+  }
+  
+  return(all_results)
+}
+
+# Create visualization for all categories
+create_vaccination_plot <- function(data) {
+  # Ensure year is numeric for proper plotting
+  data$YEAR <- as.numeric(as.character(data$YEAR))
+  
+  # Convert vaccine_category to factor with specified order
+  data$vaccine_category <- factor(data$vaccine_category, 
+                                 levels = c("0", "1-4", "5-7", "8+", "NA"))
+  
+  # Define distinct colors for all categories
+  category_colors <- c(
+    "0" = "#E41A1C",     # Red
+    "1-4" = "#4DAF4A",   # Green
+    "5-7" = "#377EB8",   # Blue
+    "8+" = "#984EA3",    # Purple
+    "NA" = "#FF7F00"     # Orange
+  )
+  
+  # Create a more effective visualization
+  plot <- ggplot(data, aes(x = YEAR, y = count, color = vaccine_category, group = vaccine_category)) +
+    geom_line(size = 0.7) +
+    geom_point(size = 1) +
+    facet_wrap(~ region, scales = "fixed", ncol = 2) +
+    scale_color_manual(values = category_colors, name = "Vaccines Received") +
+    scale_x_continuous(breaks = seq(2010, 2023, by = 1)) +
+    scale_y_continuous(
+  labels = function(x) {
+    ifelse(x == 0, "0", paste0(x/1000, "k"))
+  },
+  limits = c(0, 1750000),
+  breaks = seq(0, 1750000, by = 250000)
+)+
+    labs(
+      title = "Number of Children by Vaccination Category and Census Region",
+      subtitle = "Based on recommended doses for each vaccine type",
+      x = "Year",
+      y = "Number of Children (Weighted Count)"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 12, face = "bold"),
+      strip.background = element_rect(fill = "lightgray"),
+      strip.text = element_text(size = 12, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(angle = 90, hjust = 1),
+      panel.grid.major = element_line(color = "grey90"),
+      panel.border = element_rect(color = "black", fill = NA)
+    )
+  
+  return(plot)
+}
+
+# Create focused plots for each category
+create_category_specific_plots <- function(data) {
+  # Ensure year is numeric for proper plotting
+  data$YEAR <- as.numeric(as.character(data$YEAR))
+  
+  # Define distinct colors for categories
+  category_colors <- c(
+    "0" = "#E41A1C",     # Red
+    "1-4" = "#4DAF4A",   # Green
+    "5-7" = "#377EB8",   # Blue
+    "8+" = "#984EA3",    # Purple
+    "NA" = "#FF7F00"     # Orange
+  )
+  
+  # Create individual plots for each category
+  plot_list <- list()
+  
+  for (cat in c("0", "1-4", "5-7", "8+")) {
+    # Filter for this category
+    cat_data <- data[data$vaccine_category == cat, ]
+    
+    plot_list[[cat]] <- ggplot(cat_data, aes(x = YEAR, y = count, color = region, group = region)) +
+      geom_line(size = 1.2) +
+      geom_point(size = 2) +
+      scale_x_continuous(breaks = seq(2010, 2023, by = 1)) +
+      scale_y_continuous(labels = scales::comma) +
+      labs(
+        title = paste("Children with", cat, "Vaccines by Region"),
+        x = "Year",
+        y = "Number of Children (Weighted Count)",
+        color = "Region"
+      ) +
+      theme_light() +
+      theme(
+        plot.title = element_text(size = 14, face = "bold"),
+        axis.title = element_text(size = 12, face = "bold"),
+        axis.text.x = element_text(angle = 90, hjust = 1),
+        panel.grid.major = element_line(color = "grey90"),
+        panel.border = element_rect(color = "black", fill = NA),
+        legend.position = "bottom"
+      )
+  }
+  
+  return(plot_list)
+}
+
+# Main function
+main <- function() {
+  # Process all years
+  cat("Starting data processing...\n")
+  results <- process_all_years(2010, 2023)
+  
+  # Check if we have results
+  if (nrow(results) == 0) {
+    cat("No results were generated. Please check your data.\n")
+    return(NULL)
+  }
+  
+  cat("Summary of data:\n")
+  print(summary(results))
+  
+  cat("Creating main visualization...\n")
+  # Create the main plot
+  main_plot <- create_vaccination_plot(results)
+  
+  # Display the plot
+  print(main_plot)
+  
+  # Save the plot
+  ggsave("vaccination_by_region.png", main_plot, width = 12, height = 8, dpi = 300)
+  cat("Saved main plot as vaccination_by_region.png\n")
+  
+  cat("Creating category-specific plots...\n")
+  # Create category-specific plots
+  category_plots <- create_category_specific_plots(results)
+  
+  # Display and save each category plot
+  for (cat in names(category_plots)) {
+    print(category_plots[[cat]])
+    filename <- paste0("vaccination_category_", cat, ".png")
+    ggsave(filename, category_plots[[cat]], width = 10, height = 6, dpi = 300)
+    cat("Saved", filename, "\n")
+  }
+  
+  return(results)
+}
+
+# Run the main function
+results <- main()
+
+
+
+```
+
+
+```{r}
+process_hispanic_year <- function(year) {
+  year_code <- substr(as.character(year), 3, 4)
+  df_name <- paste0("df", year_code, "2")
+  
+  if (!exists(df_name)) {
+    cat("Skipping year", year, "- dataset not found\n")
+    return(NULL)
+  }
+  
+  df <- get(df_name)
+  
+  # Identify weight variable
+  weight_var <- if ("PROVWT" %in% names(df)) {
+    "PROVWT"
+  } else if ("PROVWT_C" %in% names(df)) {
+    "PROVWT_C"
+  } else {
+    possible_weights <- grep("^PROVWT", names(df), value = TRUE)
+    if (length(possible_weights) > 0) {
+      possible_weights[1]
+    } else {
+      cat("Warning: No weight variable found for", year, "\n")
+      return(NULL)
+    }
+  }
+
+  # Create Hispanic/Non-Hispanic grouping based on RACEETHK
+  df$ethnicity <- NA_character_
+  df$ethnicity[df$RACEETHK == 1] <- "HISPANIC"
+  df$ethnicity[df$RACEETHK %in% 2:4] <- "NON-HISPANIC"
+
+  # Exclude reserved/missing codes
+  df <- df %>% filter(!is.na(ethnicity))
+
+  # Calculate weighted counts
+  result <- df %>%
+    group_by(ethnicity) %>%
+    summarise(
+      count = sum(.data[[weight_var]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(YEAR = year)
+
+  return(result)
+}
+# Run over multiple years
+process_hispanic_all_years <- function(start_year = 2010, end_year = 2023) {
+  all_data <- map_dfr(start_year:end_year, process_hispanic_year)
+  return(all_data)
+}
+
+# Plotting function
+plot_hispanic_vs_nonhispanic <- function(data) {
+  ggplot(data, aes(x = YEAR, y = count, color = ethnicity, group = ethnicity)) +
+    geom_line(size = 1) +
+    geom_point(size = 1.5) +
+    labs(
+      title = "Number of Children by Hispanic Origins (Weighted)",
+      x = "Year",
+      y = "Weighted Count"
+    ) +
+    scale_y_continuous(labels = scales::comma) +
+    scale_x_continuous(breaks = unique(data$YEAR)) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      axis.text= element_text(size= 10),
+       panel.grid.major = element_line(color = "grey85"),         # Lighter major gridlines
+  panel.grid.minor = element_line(color = "grey92"),         # Even lighter minor gridlines
+  panel.background = element_blank(),                        # Optional: clean white background
+  panel.border = element_rect(color = "black", fill = NA),   # Optional: add black border
+  axis.line = element_line(color = "black"),
+      axis.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.title = element_blank()
+    )
+}
+
+#PLOTTTING THE GRAPH
+hispanic_results <- process_hispanic_all_years(2010, 2023)
+p <- plot_hispanic_vs_nonhispanic(hispanic_results)
+print(p)
+ggsave("hispanic_vs_nonhispanic.png", plot = p, width = 10, height = 6, dpi = 300)
+```
+
+
+
+```{r}
+library(tidyverse)
+library(survey)
+
+extract_incoporar_data <- function(year) {
+  year_code <- substr(as.character(year), 3, 4)
+  design_name <- paste0("nis_design", year_code)
+  
+  if (!exists(design_name)) {
+    cat("Skipping year", year, "- survey design not found\n")
+    return(NULL)
+  }
+
+  design <- get(design_name)
+  
+  if (!"INCPORAR" %in% names(design$variables)) {
+    cat("INCPORAR not found in", design_name, "\n")
+    return(NULL)
+  }
+
+  # Filter the design first
+  filtered_design <- subset(design, !is.na(INCPORAR) & INCPORAR >= 0 & INCPORAR <= 3)
+  
+  # Extract just the necessary variables
+  data <- filtered_design$variables %>%
+    select(INCPORAR) %>%
+    mutate(weight = weights(filtered_design), YEAR = year)
+
+  return(data)
+}
+
+# Loop through all years
+all_incoporar_data <- map_dfr(2010:2023, extract_incoporar_data)
+
+# Plot weighted density
+p <- ggplot(all_incoporar_data, aes(x = INCPORAR, weight = weight)) +
+  geom_density(fill = "purple", alpha = 0.6, linewidth = 0.8) +
+  facet_wrap(~YEAR, ncol = 3) +
+  labs(
+    title = "Weighted Density of Income to Poverty Ratio (INCPORAR)",
+    x = "INCPORAR",
+    y = "Weighted Density"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.title = element_text(face = "bold", size = 12),
+    strip.text = element_text(size = 11, face = "bold")
+  )
+
+#PLOTTTING THE GRAPH
+print(p)
+ggsave("weighted density of income to poverty ratio.png", plot = p, width = 10, height = 6, dpi = 300)
+```
+
+
+
+
+
+```{r}
+process_hispanic_language <- function(year) {
+  year_code <- substr(as.character(year), 3, 4)
+  df_name <- paste0("df", year_code, "2")
+  
+  if (!exists(df_name)) {
+    cat("Skipping year", year, "- dataset not found\n")
+    return(NULL)
+  }
+  
+  df <- get(df_name)
+  
+  # Identify weight variable
+  weight_var <- if ("PROVWT" %in% names(df)) {
+    "PROVWT"
+  } else if ("PROVWT_C" %in% names(df)) {
+    "PROVWT_C"
+  } else {
+    possible_weights <- grep("^PROVWT", names(df), value = TRUE)
+    if (length(possible_weights) > 0) {
+      possible_weights[1]
+    } else {
+      cat("Warning: No weight variable found for", year, "\n")
+      return(NULL)
+    }
+  }
+  
+  # Check if LANGUAGE variable exists
+  if (!("LANGUAGE" %in% names(df))) {
+    lang_vars <- grep("^LANGUAGE", names(df), value = TRUE)
+    if (length(lang_vars) > 0) {
+      lang_var <- lang_vars[1]
+    } else {
+      cat("Warning: No language variable found for", year, "\n")
+      return(NULL)
+    }
+  } else {
+    lang_var <- "LANGUAGE"
+  }
+  
+  # Create Hispanic/Non-Hispanic grouping based on RACEETHK
+  df$ethnicity <- NA_character_
+  df$ethnicity[df$RACEETHK == 1] <- "HISPANIC"
+  df$ethnicity[df$RACEETHK %in% 2:4] <- "NON-HISPANIC"
+  
+  # Standardize language values
+  df$interview_language <- NA_character_
+  
+  # Determine language coding based on documentation or data inspection
+  # This may vary by year, so adapt as needed
+  df$interview_language[df[[lang_var]] == 1] <- "ENGLISH"
+  df$interview_language[df[[lang_var]] == 2] <- "SPANISH"
+  df$interview_language[df[[lang_var]] >= 3 & !is.na(df[[lang_var]])] <- "OTHER"
+  
+  # Filter to only Hispanic respondents and non-missing language
+  hispanic_df <- df %>% 
+    filter(ethnicity == "HISPANIC", !is.na(interview_language))
+  
+  # Calculate weighted counts by language
+  result <- hispanic_df %>%
+    group_by(interview_language) %>%
+    summarise(
+      count = sum(.data[[weight_var]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(YEAR = year)
+  
+  return(result)
+}
+
+# Run over multiple years
+process_hispanic_language_all_years <- function(start_year = 2010, end_year = 2023) {
+  all_data <- map_dfr(start_year:end_year, process_hispanic_language)
+  return(all_data)
+}
+
+# Plotting function
+plot_hispanic_language <- function(data) {
+  # Calculate percentage for each year
+  data_pct <- data %>%
+    group_by(YEAR) %>%
+    mutate(total = sum(count),
+           percentage = count/total * 100)
+  
+  # Plot
+  ggplot(data_pct, aes(x = YEAR, y = percentage, fill = interview_language)) +
+    geom_bar(stat = "identity", position = "stack") +
+    labs(
+      title = "Interview Language Among Hispanic Respondents",
+      subtitle = "Weighted percentage by year",
+      x = "Year",
+      y = "Percentage (%)",
+      fill = "Interview Language"
+    ) +
+    scale_y_continuous(labels = function(x) paste0(x, "%")) +
+    scale_x_continuous(breaks = unique(data$YEAR)) +
+    scale_fill_brewer(palette = "Set2") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      axis.text = element_text(size = 10),
+      panel.grid.major = element_line(color = "grey85"),
+      panel.grid.minor = element_line(color = "grey92"),
+      panel.background = element_blank(),
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "bottom"
+    )
+}
+
+# Process and plot the data
+hispanic_language_results <- process_hispanic_language_all_years(2010, 2023)
+p <- plot_hispanic_language(hispanic_language_results)
+print(p)
+ggsave("hispanic_language_distribution.png", plot = p, width = 10, height = 6, dpi = 300)
+
+# Alternative: Line plot showing trends over time
+plot_hispanic_language_trends <- function(data) {
+  # Calculate percentage for each year
+  data_pct <- data %>%
+    group_by(YEAR) %>%
+    mutate(total = sum(count),
+           percentage = count/total * 100)
+  
+  # Plot
+  ggplot(data_pct, aes(x = YEAR, y = percentage, color = interview_language, group = interview_language)) +
+    geom_line(size = 1) +
+    geom_point(size = 2) +
+    labs(
+      title = "Interview Language Trends Among Hispanic Respondents",
+      x = "Year",
+      y = "Percentage (%)",
+      color = "Interview Language"
+    ) +
+    scale_y_continuous(labels = function(x) paste0(x, "%")) +
+    scale_x_continuous(breaks = unique(data$YEAR)) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      axis.text = element_text(size = 10),
+      panel.grid.major = element_line(color = "grey85"),
+      panel.grid.minor = element_line(color = "grey92"),
+      panel.background = element_blank(),
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "bottom"
+    )
+}
+
+# Create the trend line plot
+p_trend <- plot_hispanic_language_trends(hispanic_language_results)
+print(p_trend)
+ggsave("hispanic_language_trends.png", plot = p_trend, width = 10, height = 6, dpi = 300)
+
+# Additional function for total counts across all years
+plot_hispanic_language_total <- function(data) {
+  # Sum counts across all years by language
+  total_by_language <- data %>%
+    group_by(interview_language) %>%
+    summarise(total_count = sum(count, na.rm = TRUE))
+  
+  # Create ordered factor for interview language
+total_by_language$interview_language <- factor(
+  total_by_language$interview_language,
+  levels = c("ENGLISH", "SPANISH", "OTHER")  # Specify the desired order here
+)
+
+  # Plot
+  ggplot(total_by_language, aes(x = interview_language, y = total_count, fill = interview_language)) +
+    geom_bar(stat = "identity", width = 0.6) +
+    geom_text(aes(label = scales::comma(round(total_count))), 
+              position = position_stack(vjust = 0.5), 
+              color = "black", size = 4, fontface = "bold") +
+    labs(
+      title = "Total Hispanic Respondents by Interview Language (2010-2023)",
+      x = "Interview Language",
+      y = "Total Weighted Count",
+      fill = "Interview Language"
+    ) +
+    scale_y_continuous(labels = scales::comma) +
+    scale_fill_brewer(palette = "Set2") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      axis.text = element_text(size = 10),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.background = element_blank(),
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.title = element_text(face = "bold"),
+      legend.position = "none"
+    )
+}
+
+# Create and save the total bar graph
+p_total <- plot_hispanic_language_total(hispanic_language_results)
+print(p_total)
+ggsave("hispanic_language_total.png", plot = p_total, width = 8, height = 6, dpi = 300)
+
+
+# Create a segmented bar graph showing language distribution by year
+plot_hispanic_language_segmented <- function(data) {
+  # Prepare data
+  data_prepared <- data %>%
+    group_by(YEAR) %>%
+    mutate(total = sum(count),
+           percentage = count/total * 100)
+  
+  # Plot
+  ggplot(data_prepared, aes(x = factor(YEAR), y = count, fill = interview_language)) +
+    geom_bar(stat = "identity", position = "stack") +
+    labs(
+      title = "Hispanic Respondents by Interview Language and Year",
+      x = "Year",
+      y = "Number of Respondents (Weighted)",
+      fill = "Interview Language"
+    ) +
+    scale_y_continuous(labels = scales::comma) +
+    scale_fill_brewer(palette = "Set2") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(face = "bold", size = 12),
+      axis.text = element_text(size = 10),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      panel.background = element_blank(),
+      panel.border = element_rect(color = "black", fill = NA),
+      axis.line = element_line(color = "black"),
+      axis.title = element_text(face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "bottom"
+    )
+}
+
+# Create and save the segmented bar graph
+p_segmented <- plot_hispanic_language_segmented(hispanic_language_results)
+print(p_segmented)
+ggsave("hispanic_language_by_year.png", plot = p_segmented, width = 12, height = 6, dpi = 300)
+
+```
+
+
+```{r}
+# Load required libraries
+library(tidyverse)
+library(ggplot2)
+
+# Function to process maternal education by region for a single year
+process_maternal_education_by_region <- function(year) {
+  # Get the two-digit year code
+  year_code <- substr(as.character(year), 3, 4)
+  
+  # Get dataset name
+  df_name <- paste0("df", year_code, "2")
+  
+  # Skip if dataset doesn't exist
+  if (!exists(df_name)) {
+    cat("Skipping year", year, "- dataset not found\n")
+    return(NULL)
+  }
+  
+  cat("Processing year", year, "\n")
+  
+  # Get the dataset
+  df <- get(df_name)
+  
+  # Find the appropriate weight variable
+  if ("PROVWT" %in% names(df)) {
+    weight_var <- "PROVWT"
+  } else if ("PROVWT_C" %in% names(df)) {
+    weight_var <- "PROVWT_C"
+  } else {
+    # Find any weight variable
+    possible_weights <- grep("^PROVWT", names(df), value = TRUE)
+    if (length(possible_weights) > 0) {
+      weight_var <- possible_weights[1]
+    } else {
+      cat("Warning: No weight variable found for", year, "\n")
+      return(NULL)
+    }
+  }
+  
+  # Ensure we only use provider-verified data
+  if ("PDAT" %in% names(df)) {
+    df <- df %>% filter(PDAT == 1)
+  }
+  
+  # Check for education variable
+  if (!"EDUC1" %in% names(df)) {
+    # Look for alternative education variables
+    edu_vars <- grep("^EDUC", names(df), value = TRUE)
+    if (length(edu_vars) > 0) {
+      cat("Using", edu_vars[1], "instead of EDUC1 for year", year, "\n")
+      educ_var <- edu_vars[1]
+    } else {
+      cat("Warning: No education variable found for", year, "\n")
+      return(NULL)
+    }
+  } else {
+    educ_var <- "EDUC1"
+  }
+  
+  # Create region variable
+  df$region <- NA_character_
+  df$region[df$CEN_REG == 1] <- "NORTHEAST"
+  df$region[df$CEN_REG == 2] <- "MIDWEST" 
+  df$region[df$CEN_REG == 3] <- "SOUTH"
+  df$region[df$CEN_REG == 4] <- "WEST"
+  
+  # Create education category
+  df$education <- NA_character_
+  df$education[df[[educ_var]] == 1] <- "< 12 YEARS"
+  df$education[df[[educ_var]] == 2] <- "12 YEARS"
+  df$education[df[[educ_var]] == 3] <- "> 12 YEARS, NON-COLLEGE GRAD"
+  df$education[df[[educ_var]] == 4] <- "COLLEGE GRAD"
+  
+  # Filter out records with missing region or education
+  df <- df %>% filter(!is.na(region), !is.na(education))
+  
+  # Calculate weighted counts for each region and education level
+  result <- df %>%
+    group_by(region, education) %>%
+    summarise(
+      weighted_count = sum(.data[[weight_var]], na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(YEAR = year)
+  
+  # Calculate percentages within each region
+  result <- result %>%
+    group_by(region, YEAR) %>%
+    mutate(
+      total_regional_count = sum(weighted_count),
+      percentage = (weighted_count / total_regional_count) * 100
+    ) %>%
+    ungroup()
+  
+  return(result)
+}
+
+# Process all years
+process_maternal_education_all_years <- function(start_year = 2010, end_year = 2023) {
+  all_results <- data.frame()
+  
+  for (year in start_year:end_year) {
+    year_results <- process_maternal_education_by_region(year)
+    
+    if (!is.null(year_results)) {
+      all_results <- rbind(all_results, year_results)
+    }
+  }
+  
+  return(all_results)
+}
+
+# Create visualization for education levels by region
+create_education_region_plot <- function(data) {
+  # Ensure year is numeric for proper plotting
+  data$YEAR <- as.numeric(as.character(data$YEAR))
+  
+  # Convert education to factor with specified order
+  data$education <- factor(data$education, 
+                          levels = c("< 12 YEARS", "12 YEARS", 
+                                     "> 12 YEARS, NON-COLLEGE GRAD", "COLLEGE GRAD"))
+  
+  # Plot showing percentage of each education level within regions over time
+  plot <- ggplot(data, aes(x = YEAR, y = percentage, color = education, group = education)) +
+    geom_line(size = 1) +
+    geom_point(size = 1.5) +
+    facet_wrap(~ region, scales = "fixed", ncol = 2) +
+    scale_color_brewer(palette = "Set1", name = "Maternal Education") +
+    scale_x_continuous(breaks = seq(2010, 2023, by = 2)) +
+    scale_y_continuous(limits = c(0, 70), breaks = seq(0, 70, by = 10)) +
+    labs(
+      title = "Maternal Education Levels by Census Region",
+      subtitle = "Percentage within each region over time",
+      x = "Year",
+      y = "Percentage (%)"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 12, face = "bold"),
+      strip.background = element_rect(fill = "lightgray"),
+      strip.text = element_text(size = 12, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.major = element_line(color = "grey90"),
+      panel.border = element_rect(color = "black", fill = NA)
+    )
+  
+  return(plot)
+}
+
+# Create a stacked bar chart with raw numbers and consistent color palette
+create_education_stacked_bar <- function(data) {
+  # Filter to most recent year for a snapshot comparison
+  most_recent_year <- max(data$YEAR)
+  recent_data <- data %>% filter(YEAR == most_recent_year)
+  
+  # Convert education to factor with specified order
+  recent_data$education <- factor(recent_data$education, 
+                                 levels = c("COLLEGE GRAD", 
+                                            "> 12 YEARS, NON-COLLEGE GRAD", 
+                                            "12 YEARS", 
+                                            "< 12 YEARS"))
+  
+  # Region order based on college graduation counts
+  region_order <- recent_data %>%
+    filter(education == "COLLEGE GRAD") %>%
+    arrange(desc(weighted_count)) %>%
+    pull(region)
+  
+  recent_data$region <- factor(recent_data$region, levels = region_order)
+  
+  # Define a consistent color palette - use a blue-based palette
+  education_colors <- c(
+    "COLLEGE GRAD" = "#2c7fb8",              # Dark blue
+    "> 12 YEARS, NON-COLLEGE GRAD" = "#7fcdbb", # Medium blue-green
+    "12 YEARS" = "#c7e9b4",                  # Light green-blue
+    "< 12 YEARS" = "#ffffcc"                 # Very light yellow
+  )
+  
+  # Create stacked bar chart with raw numbers
+  plot <- ggplot(recent_data, aes(x = region, y = weighted_count, fill = education)) +
+    geom_bar(stat = "identity", position = "stack") +
+    geom_text(aes(label = sprintf("%d", round(weighted_count))), 
+              position = position_stack(vjust = 0.5),
+              color = "black", fontface = "bold", size = 3.5) +
+    scale_fill_manual(values = education_colors, name = "Maternal Education") +
+    scale_y_continuous(labels = scales::comma) +
+    labs(
+      title = paste("Maternal Education by Region in", most_recent_year),
+      subtitle = "Regions ordered by college graduation counts",
+      x = "Census Region",
+      y = "Number of Children (Weighted)"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(size = 12, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 12, face = "bold"),
+      panel.grid.major.x = element_blank()
+    )
+  
+  return(plot)
+}
+# Create clean heatmap without percentage labels
+create_education_heatmap <- function(data) {
+  # Focus on college graduates to identify regions with highest education
+  college_data <- data %>% filter(education == "COLLEGE GRAD")
+  
+  # Create heatmap without percentage labels
+  heatmap_plot <- ggplot(college_data, aes(x = YEAR, y = region, fill = percentage)) +
+    geom_tile(color = "white", size = 0.5) +
+    scale_fill_gradient2(
+      low = "white", 
+      high = "darkblue", 
+      mid = "lightblue",
+      midpoint = 50,
+      name = "College Grad %"
+    ) +
+    scale_x_continuous(breaks = seq(2010, 2023, by = 1)) +
+    labs(
+      title = "Percentage of College Graduate Mothers by Region",
+      subtitle = "Tracking regional differences in higher education",
+      x = "Year",
+      y = "Census Region"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid = element_blank(),
+      legend.position = "right"
+    )
+  
+  return(heatmap_plot)
+}
+
+# Main function
+main <- function() {
+  # Process all years
+  cat("Starting data processing for maternal education analysis...\n")
+  education_results <- process_maternal_education_all_years(2010, 2023)
+  
+  # Check if we have results
+  if (nrow(education_results) == 0) {
+    cat("No results were generated. Please check your data.\n")
+    return(NULL)
+  }
+  
+  cat("Summary of maternal education data by region:\n")
+  print(summary(education_results))
+  
+  # Create main trend plot
+  cat("Creating maternal education trend plot by region...\n")
+  trend_plot <- create_education_region_plot(education_results)
+  print(trend_plot)
+  ggsave("maternal_education_by_region_trends.png", trend_plot, width = 12, height = 8, dpi = 300)
+  
+  # Create stacked bar chart for most recent year with raw numbers
+  cat("Creating stacked bar chart with raw numbers for most recent year...\n")
+  bar_plot <- create_education_stacked_bar(education_results)
+  print(bar_plot)
+  ggsave("maternal_education_by_region_counts.png", bar_plot, width = 10, height = 7, dpi = 300)
+  
+  # Create clean heatmap
+  cat("Creating clean heatmap of college graduation rates by region...\n")
+  heatmap_plot <- create_education_heatmap(education_results)
+  print(heatmap_plot)
+  ggsave("maternal_education_heatmap.png", heatmap_plot, width = 12, height = 6, dpi = 300)
+  
+  return(education_results)
+}
+
+# Run the main function
+education_data <- main()
+```
+
+```{r}
+ncol(NISPUF10)
+```
+
+```{r}
+ncol(NISPUF11)
+```
+
+```{r}
+ncol(NISPUF12)
+```
+```{r}
+ncol(NISPUF13)
+```
+
+```{r}
+ncol(NISPUF14)
+```
+
+```{r}
+ncol(NISPUF15)
+```
+
+
+```{r}
+ncol(NISPUF16)
+```
+
+
+```{r}
+ncol(NISPUF17)
+```
+
+
+```{r}
+ncol(NISPUF18)
+```
+
+
+```{r}
+ncol(NISPUF19)
+```
+
+```{r}
+ncol(NISPUF20)
+```
+
+
+```{r}
+ncol(NISPUF21)
+```
+
+
+```{r}
+ncol(NISPUF22)
+```
+
+
+```{r}
+ncol(NISPUF23)
+```
+```{r}
+# Load required libraries
+library(tidyverse)
+library(ggplot2)
+library(survey)  # Added for proper survey design handling
+
+# Function to process maternal education by region for a single year
+process_maternal_education_by_region <- function(year) {
+  # Get the two-digit year code
+  year_code <- substr(as.character(year), 3, 4)
+  
+  # Get dataset name
+  df_name <- paste0("df", year_code, "2")
+  
+  # Skip if dataset doesn't exist
+  if (!exists(df_name)) {
+    cat("Skipping year", year, "- dataset not found\n")
+    return(NULL)
+  }
+  
+  cat("Processing year", year, "\n")
+  
+  # Get the dataset
+  df <- get(df_name)
+  
+  # Ensure we only use provider-verified data
+  if ("PDAT" %in% names(df)) {
+    df <- df %>% filter(PDAT == 1)
+  }
+  
+  # Check for education variable
+  if (!"EDUC1" %in% names(df)) {
+    # Look for alternative education variables
+    edu_vars <- grep("^EDUC", names(df), value = TRUE)
+    if (length(edu_vars) > 0) {
+      cat("Using", edu_vars[1], "instead of EDUC1 for year", year, "\n")
+      educ_var <- edu_vars[1]
+    } else {
+      cat("Warning: No education variable found for", year, "\n")
+      return(NULL)
+    }
+  } else {
+    educ_var <- "EDUC1"
+  }
+  
+  # Create region variable
+  df$region <- NA_character_
+  df$region[df$CEN_REG == 1] <- "NORTHEAST"
+  df$region[df$CEN_REG == 2] <- "MIDWEST" 
+  df$region[df$CEN_REG == 3] <- "SOUTH"
+  df$region[df$CEN_REG == 4] <- "WEST"
+  
+  # Create education category
+  df$education <- NA_character_
+  df$education[df[[educ_var]] == 1] <- "< 12 YEARS"
+  df$education[df[[educ_var]] == 2] <- "12 YEARS"
+  df$education[df[[educ_var]] == 3] <- "> 12 YEARS, NON-COLLEGE GRAD"
+  df$education[df[[educ_var]] == 4] <- "COLLEGE GRAD"
+  
+  # Filter out records with missing region or education
+  df <- df %>% filter(!is.na(region), !is.na(education))
+  
+  # Add this before creating svy_design
+print(paste("Does SEQNUMC exist:", "SEQNUMC" %in% names(df)))
+print(paste("Does STRATUM exist:", "STRATUM" %in% names(df)))
+print(paste("Does PROVWT_C exist:", "PROVWT_C" %in% names(df)))
+print(paste("Number of non-NA values in PROVWT_C:", sum(!is.na(df$PROVWT_C))))
+  
+# This section should replace the survey design and analysis part
+# Add this after filtering out records with missing region or education
+
+  # Testing if we have enough non-NA values in design variables
+  cat("Checking survey design variables for", year, "...\n")
+  cat("Records with non-NA SEQNUMC:", sum(!is.na(df$SEQNUMC)), "\n")
+  cat("Records with non-NA STRATUM:", sum(!is.na(df$STRATUM)), "\n")
+  cat("Records with non-NA PROVWT_C:", sum(!is.na(df$PROVWT_C)), "\n")
+  
+  # Check for unique values in stratification
+  cat("Unique values in STRATUM:", length(unique(df$STRATUM)), "\n")
+  
+  # For proper survey analysis, we need to use survey package correctly
+  library(survey)
+  
+  # Use withCallingHandlers to catch and print warnings
+  withCallingHandlers({
+    # Define the survey design with proper handling
+    svy_design <- svydesign(
+      id = ~SEQNUMC,       # Clustering (Primary Sampling Unit)
+      strata = ~STRATUM,   # Stratification
+      weights = ~PROVWT_C, # Sampling weights (using PROVWT_C as specified)
+      data = df,
+      nest = TRUE          # Important for nested sampling
+    )
+    
+    # Check design
+    cat("Survey design summary:\n")
+    print(summary(svy_design))
+    
+    # Create a more direct approach 
+    # First try to get totals by region and education
+    # Using the domains approach which is more robust
+    result <- NULL
+    
+    cat("Calculating domain estimates...\n")
+    
+    # Try different methods - first with svyby
+    tryCatch({
+      cat("Method 1: Using svyby...\n")
+      region_edu_totals <- svyby(
+        ~1,                         # Formula for calculation (count)
+        ~region + education,        # Grouping variables
+        design = svy_design,        # Survey design
+        svytotal,                   # Function to apply (population total)
+        keep.names = FALSE          # Don't keep formula names
+      )
+      
+      # If we made it here, svyby worked
+      cat("svyby successful\n")
+      
+      # Rename columns and prepare output
+      result <- data.frame(
+        region = region_edu_totals$region,
+        education = region_edu_totals$education,
+        weighted_count = region_edu_totals[[3]],  # The total column
+        se_count = region_edu_totals[[4]],        # The standard error column
+        YEAR = year
+      )
+    }, error = function(e) {
+      cat("svyby error:", e$message, "\n")
+      # Continue to next method
+    })
+    
+    # If the first method failed, try another approach
+    if (is.null(result)) {
+      cat("Method 2: Using interaction term and svytotal...\n")
+      
+      # Create an interaction term
+      df$region_edu <- interaction(df$region, df$education, sep=":")
+      svy_design$variables$region_edu <- df$region_edu
+      
+      # Get the totals
+      tryCatch({
+        totals <- svytotal(~region_edu, design=svy_design)
+        
+        # Convert to data frame
+        result_df <- data.frame(
+          weighted_count = coef(totals),
+          se_count = sqrt(diag(vcov(totals)))
+        )
+        
+        # Add row names as a column
+        result_df$region_edu <- rownames(result_df)
+        
+        # Split the region_edu column
+        result_df <- result_df %>%
+          separate(region_edu, into=c("region", "education"), sep=":")
+        
+        # Add year
+        result_df$YEAR <- year
+        
+        result <- result_df
+        cat("Interaction approach successful\n")
+      }, error = function(e) {
+        cat("svytotal error:", e$message, "\n")
+      })
+    }
+    
+    # If both methods failed, fall back to simple weighted analysis
+    if (is.null(result)) {
+      cat("Falling back to simple weighted analysis...\n")
+      
+      result <- df %>%
+        group_by(region, education) %>%
+        summarise(
+          weighted_count = sum(PROVWT_C, na.rm = TRUE),
+          .groups = "drop"
+        ) %>%
+        mutate(
+          se_count = NA,  # No standard error available with simple approach
+          YEAR = year
+        )
+    }
+    
+    # Calculate percentages within each region
+    result <- result %>%
+      group_by(region, YEAR) %>%
+      mutate(
+        total_regional_count = sum(weighted_count),
+        percentage = (weighted_count / total_regional_count) * 100
+      ) %>%
+      ungroup()
+    
+    # Return result
+    return(result)
+    
+  }, warning = function(w) {
+    cat("Warning:", conditionMessage(w), "\n")
+  })
+
+}
+
+# Process all years
+process_maternal_education_all_years <- function(start_year = 2010, end_year = 2023) {
+  all_results <- data.frame()
+  
+  for (year in start_year:end_year) {
+    year_results <- process_maternal_education_by_region(year)
+    
+    if (!is.null(year_results)) {
+      all_results <- rbind(all_results, year_results)
+    }
+  }
+  
+  return(all_results)
+}
+
+# Create visualization for education levels by region
+create_education_region_plot <- function(data) {
+  # Ensure year is numeric for proper plotting
+  data$YEAR <- as.numeric(as.character(data$YEAR))
+  
+  # Convert education to factor with specified order
+  data$education <- factor(data$education, 
+                          levels = c("< 12 YEARS", "12 YEARS", 
+                                     "> 12 YEARS, NON-COLLEGE GRAD", "COLLEGE GRAD"))
+  
+  # Plot showing percentage of each education level within regions over time
+  plot <- ggplot(data, aes(x = YEAR, y = percentage, color = education, group = education)) +
+    geom_line(size = 1) +
+    geom_point(size = 1.5) +
+    # Optional: add error bars for standard errors
+    # geom_errorbar(aes(ymin = percentage - 1.96*se_percentage, 
+    #                  ymax = percentage + 1.96*se_percentage), width = 0.3) +
+    facet_wrap(~ region, scales = "fixed", ncol = 2) +
+    scale_color_brewer(palette = "Set1", name = "Maternal Education") +
+    scale_x_continuous(breaks = seq(2010, 2023, by = 2)) +
+    scale_y_continuous(limits = c(0, 70), breaks = seq(0, 70, by = 10)) +
+    labs(
+      title = "Maternal Education Levels by Census Region",
+      subtitle = "Percentage within each region over time",
+      x = "Year",
+      y = "Percentage (%)"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 12, face = "bold"),
+      strip.background = element_rect(fill = "lightgray"),
+      strip.text = element_text(size = 12, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid.major = element_line(color = "grey90"),
+      panel.border = element_rect(color = "black", fill = NA)
+    )
+  
+  return(plot)
+}
+
+# Create a stacked bar chart with raw numbers and consistent color palette
+create_education_stacked_bar <- function(data) {
+  # Filter to most recent year for a snapshot comparison
+  most_recent_year <- max(data$YEAR)
+  recent_data <- data %>% filter(YEAR == most_recent_year)
+  
+  # Convert education to factor with specified order
+  recent_data$education <- factor(recent_data$education, 
+                                 levels = c("COLLEGE GRAD", 
+                                            "> 12 YEARS, NON-COLLEGE GRAD", 
+                                            "12 YEARS", 
+                                            "< 12 YEARS"))
+  
+  # Region order based on college graduation counts
+  region_order <- recent_data %>%
+    filter(education == "COLLEGE GRAD") %>%
+    arrange(desc(weighted_count)) %>%
+    pull(region)
+  
+  recent_data$region <- factor(recent_data$region, levels = region_order)
+  
+  # Define a consistent color palette - use a blue-based palette
+  education_colors <- c(
+    "COLLEGE GRAD" = "#2c7fb8",              # Dark blue
+    "> 12 YEARS, NON-COLLEGE GRAD" = "#7fcdbb", # Medium blue-green
+    "12 YEARS" = "#c7e9b4",                  # Light green-blue
+    "< 12 YEARS" = "#ffffcc"                 # Very light yellow
+  )
+  
+  # Create stacked bar chart with raw numbers
+  plot <- ggplot(recent_data, aes(x = region, y = weighted_count, fill = education)) +
+    geom_bar(stat = "identity", position = "stack") +
+    geom_text(aes(label = sprintf("%d", round(weighted_count))), 
+              position = position_stack(vjust = 0.5),
+              color = "black", fontface = "bold", size = 3.5) +
+    scale_fill_manual(values = education_colors, name = "Maternal Education") +
+    scale_y_continuous(labels = scales::comma) +
+    labs(
+      title = paste("Maternal Education by Region in", most_recent_year),
+      subtitle = "Regions ordered by college graduation counts",
+      x = "Census Region",
+      y = "Number of Children (Weighted)"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(size = 12, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 12, face = "bold"),
+      panel.grid.major.x = element_blank()
+    )
+  
+  return(plot)
+}
+
+# Create clean heatmap without percentage labels
+create_education_heatmap <- function(data) {
+  # Focus on college graduates to identify regions with highest education
+  college_data <- data %>% filter(education == "COLLEGE GRAD")
+  
+  # Create heatmap without percentage labels
+  heatmap_plot <- ggplot(college_data, aes(x = YEAR, y = region, fill = percentage)) +
+    geom_tile(color = "white", size = 0.5) +
+    scale_fill_gradient2(
+      low = "white", 
+      high = "darkblue", 
+      mid = "lightblue",
+      midpoint = 50,
+      name = "College Grad %"
+    ) +
+    scale_x_continuous(breaks = seq(2010, 2023, by = 1)) +
+    labs(
+      title = "Percentage of College Graduate Mothers by Region",
+      subtitle = "Tracking regional differences in higher education",
+      x = "Year",
+      y = "Census Region"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid = element_blank(),
+      legend.position = "right"
+    )
+  
+  return(heatmap_plot)
+}
+
+# Main function
+main <- function() {
+  # Process all years
+  cat("Starting data processing for maternal education analysis...\n")
+  education_results <- process_maternal_education_all_years(2010, 2023)
+  
+  # Check if we have results
+  if (nrow(education_results) == 0) {
+    cat("No results were generated. Please check your data.\n")
+    return(NULL)
+  }
+  
+  cat("Summary of maternal education data by region:\n")
+  print(summary(education_results))
+  
+  # Create main trend plot
+  cat("Creating maternal education trend plot by region...\n")
+  trend_plot <- create_education_region_plot(education_results)
+  print(trend_plot)
+  ggsave("maternal_education_by_region_trends.png", trend_plot, width = 12, height = 8, dpi = 300)
+  
+  # Create stacked bar chart for most recent year with raw numbers
+  cat("Creating stacked bar chart with raw numbers for most recent year...\n")
+  bar_plot <- create_education_stacked_bar(education_results)
+  print(bar_plot)
+  ggsave("maternal_education_by_region_counts.png", bar_plot, width = 10, height = 7, dpi = 300)
+  
+  # Create clean heatmap
+  cat("Creating clean heatmap of college graduation rates by region...\n")
+  heatmap_plot <- create_education_heatmap(education_results)
+  print(heatmap_plot)
+  ggsave("maternal_education_heatmap.png", heatmap_plot, width = 12, height = 6, dpi = 300)
+  
+  return(education_results)
+}
+
+# Run the main function
+education_data <- main()
+```
+
+```{r}
+# Load required libraries
+library(survey)
+library(ggplot2)
+library(dplyr)
+
+# Function to analyze one year of data
+analyze_maternal_education <- function(year_code = "102") {
+  # Get dataset name
+  df_name <- paste0("df", year_code)
+  
+  # Check if dataset exists
+  if (!exists(df_name)) {
+    stop(paste("Dataset", df_name, "not found"))
+  }
+  
+  # Get the dataset
+  df <- get(df_name)
+  
+  # Print dimensions
+  cat("Dataset dimensions:", dim(df), "\n")
+  
+  # Filter out NA values in CEN_REG and EDUC1 and ensure we use provider-verified data
+  df <- df %>% 
+    filter(!is.na(CEN_REG), !is.na(EDUC1), PDAT == 1)
+  
+  # Print dimensions after filtering
+  cat("Filtered dataset dimensions:", dim(df), "\n")
+  
+  # Create region and education factor variables with proper labels
+  df$region <- factor(
+    df$CEN_REG,
+    levels = 1:4,
+    labels = c("NORTHEAST", "MIDWEST", "SOUTH", "WEST")
+  )
+  
+  df$education <- factor(
+    df$EDUC1,
+    levels = 1:4,
+    labels = c("< 12 YEARS", "12 YEARS", "> 12 YEARS, NON-COLLEGE GRAD", "COLLEGE GRAD")
+  )
+  
+  # Calculate weighted totals manually
+  # This approach is reliable and will avoid the svyby error
+  region_edu_totals <- df %>%
+    group_by(region, education) %>%
+    summarise(
+      weighted_count = sum(PROVWT_C, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(YEAR = 2010)  # Using 2010 since we're looking at df102
+  
+  # Calculate percentages within each region
+  region_edu_totals <- region_edu_totals %>%
+    group_by(region) %>%
+    mutate(
+      total_regional_count = sum(weighted_count),
+      percentage = (weighted_count / total_regional_count) * 100
+    ) %>%
+    ungroup()
+  
+  # Order regions by college graduation counts
+  college_counts <- region_edu_totals %>%
+    filter(education == "COLLEGE GRAD") %>%
+    arrange(desc(weighted_count))
+  
+  region_order <- college_counts$region
+  
+  # Set factor levels for plotting
+  region_edu_totals$region <- factor(region_edu_totals$region, levels = region_order)
+  
+  # Define a color palette
+  education_colors <- c(
+    "COLLEGE GRAD" = "#2c7fb8",              # Dark blue
+    "> 12 YEARS, NON-COLLEGE GRAD" = "#7fcdbb", # Medium blue-green
+    "12 YEARS" = "#c7e9b4",                  # Light green-blue
+    "< 12 YEARS" = "#ffffcc"                 # Very light yellow
+  )
+  
+  # Reverse the order of education factors for better stacking
+  region_edu_totals$education <- factor(
+    region_edu_totals$education,
+    levels = rev(c("< 12 YEARS", "12 YEARS", "> 12 YEARS, NON-COLLEGE GRAD", "COLLEGE GRAD"))
+  )
+  
+  # Create stacked bar chart
+  plot <- ggplot(region_edu_totals, aes(x = region, y = weighted_count, fill = education)) +
+    geom_bar(stat = "identity", position = "stack") +
+    geom_text(aes(label = sprintf("%d", round(weighted_count))), 
+              position = position_stack(vjust = 0.5),
+              color = "black", fontface = "bold", size = 3.5) +
+    scale_fill_manual(values = education_colors, name = "Maternal Education") +
+    scale_y_continuous(labels = scales::comma) +
+    labs(
+      title = paste("Maternal Education by Region in", "2010"),
+      subtitle = "Regions ordered by college graduation counts",
+      x = "Census Region",
+      y = "Number of Children (Weighted)"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 14, face = "bold"),
+      plot.subtitle = element_text(size = 12),
+      axis.title = element_text(size = 12, face = "bold"),
+      axis.text.x = element_text(size = 12, face = "bold"),
+      legend.position = "bottom",
+      legend.title = element_text(size = 12, face = "bold"),
+      panel.grid.major.x = element_blank()
+    )
+  
+  # Print the plot
+  print(plot)
+  
+  # Save the plot
+  ggsave("maternal_education_by_region_2010.png", plot, width = 10, height = 7, dpi = 300)
+  
+  # Return the results
+  return(list(
+    data = region_edu_totals,
+    plot = plot
+  ))
+}
+
+# Run the function for 2010 data
+results_2010 <- analyze_maternal_education()
+```
+
+```{r}
+# Load packages
+library(ggplot2)
+library(dplyr)
+
+# Function to plot raw counts of maternal education by region
+plot_education_raw <- function(year_code = "232") {  # Default to 2023
+  # Get dataset name
+  df_name <- paste0("df", year_code)
+  
+  # Check if dataset exists
+  if (!exists(df_name)) {
+    stop(paste("Dataset", df_name, "not found"))
+  }
+  
+  # Get the dataset
+  df <- get(df_name)
+  
+  # Filter out NA values
+  df <- df %>% 
+    filter(!is.na(CEN_REG), !is.na(EDUC1), PDAT == 1)
+  
+  # Create region and education factor variables
+  df$region <- factor(
+    df$CEN_REG,
+    levels = 1:4,
+    labels = c("NORTHEAST", "MIDWEST", "SOUTH", "WEST")
+  )
+  
+  df$education <- factor(
+    df$EDUC1,
+    levels = 1:4,
+    labels = c("< 12 YEARS", "12 YEARS", "> 12 YEARS, NON-COLLEGE GRAD", "COLLEGE GRAD")
+  )
+  
+  # Calculate raw counts
+  region_edu_totals <- df %>%
+    group_by(region, education) %>%
+    summarise(
+      count = n(),
+      .groups = "drop"
+    )
+  
+  # Order regions by college graduation counts
+  college_counts <- region_edu_totals %>%
+    filter(education == "COLLEGE GRAD") %>%
+    arrange(desc(count))
+  
+  region_order <- college_counts$region
+  
+  # Set factor levels for plotting
+  region_edu_totals$region <- factor(region_edu_totals$region, levels = region_order)
+  
+  # Define the exact color palette from the example
+  education_colors <- c(
+    "COLLEGE GRAD" = "#2c7fb8",              # Dark blue
+    "> 12 YEARS, NON-COLLEGE GRAD" = "#7fcdbb", # Medium blue-green
+    "12 YEARS" = "#c7e9b4",                  # Light green-blue
+    "< 12 YEARS" = "#ffffcc"                 # Very light yellow
+  )
+  
+  # Create stacked bar chart
+  plot <- ggplot(region_edu_totals, aes(x = region, y = count, fill = education)) +
+    geom_bar(stat = "identity", position = "stack") +
+    geom_text(aes(label = count), 
+              position = position_stack(vjust = 0.5),
+              color = "black", fontface = "bold", size = 3.5) +
+    scale_fill_manual(values = education_colors, name = "Maternal Education") +
+    labs(
+      title = paste("Maternal Education by Region in Study Sample (2023)"),
+      subtitle = "Regions ordered by college graduation counts - Raw unweighted counts",
+      x = "Census Region",
+      y = "Number of Children in Study"
+    ) +
+    theme_light() +
+    theme(
+      plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+      plot.subtitle = element_text(size = 14, hjust = 0.5),
+      axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 20)),
+      axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 20)),
+      axis.text.x = element_text(size = 14, face = "bold"),
+      axis.text.y = element_text(size = 12),
+      legend.position = "bottom",
+      legend.title = element_text(size = 14, face = "bold"),
+      legend.text = element_text(size = 12),
+      panel.grid.major.x = element_blank(),
+      plot.margin = margin(20, 20, 20, 20)
+    )
+  
+  # Print the plot
+  print(plot)
+  
+  # Save the plot
+  ggsave("maternal_education_by_region_2023_raw.png", plot, width = 12, height = 8, dpi = 300)
+  
+  return(plot)
+}
+
+# Create the plot for 2023
+plot_2023_raw <- plot_education_raw()
+```
+

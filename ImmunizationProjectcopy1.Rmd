@@ -1,0 +1,3535 @@
+---
+title: "Immunization_Analysis"
+author: "Ramya Keerthi"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r}
+install.packages("see") 
+```
+
+Loading all the required libraries
+
+```{r}
+# Loading libraries and files
+########################################################################
+library(sjPlot)
+library(ordinal)
+library(ggplot2)
+library(data.table)
+library(reshape2)
+library(dplyr)
+library(survey)
+library(brms)
+library(viridis)
+library(mice)
+```
+
+
+
+
+```{r}
+#setwd("C:/Users/ramya/Indiana University/Pabon-Rodriguez, Felix - Ramya-Spring2025-ImmunizationProjectCDC")
+# Loading files
+load(file = "./New Data Files/NISPUF10.RData")
+#load(file = "C:\\Users\\ramya\\Indiana University\\Pabon-Rodriguez, Felix - Ramya-Spring2025-ImmunizationProjectCDC\\New Data Files\\NISPUF10.RData")
+load(file = "./New Data Files/NISPUF11.RData")
+load(file = "./New Data Files/NISPUF12.RData")
+load(file = "./New Data Files/NISPUF13.RData")
+load(file = "./New Data Files/NISPUF14.RData")
+load(file = "./New Data Files/nispuf15new.RData")
+load(file = "./New Data Files/NISPUF16.RData")
+load(file = "./New Data Files/NISPUF17.RData")
+load(file = "./New Data Files/NISPUF18.RData")
+load(file = "./New Data Files/NISPUF19.RData")
+load(file = "./New Data Files/NISPUF20.RData")
+load(file = "./New Data Files/NISPUF21.RData")
+load(file = "./New Data Files/NISPUF22.RData")
+load(file = "./New Data Files/NISPUF23.RData")
+```
+
+
+
+
+
+
+```{r}
+# If the object loaded as "nispuf15new"
+# Simply assign it to a new name
+NISPUF15 <- nispuf15new
+
+# Now you can use NISPUF15 in your code
+# If you want to remove the old named object to avoid confusion
+rm(nispuf15new)
+```
+
+
+
+
+```{r}
+convert_pdat_to_factor <- function(dataset_prefix, start_num, end_num) {
+  # Process each dataset in the range
+  for(i in start_num:end_num) {
+    # Construct the dataset name
+    dataset_name <- paste0(dataset_prefix, i)
+    
+    # Check if dataset exists
+    if(exists(dataset_name, envir = .GlobalEnv)) {
+      # Get the dataset
+      dataset <- get(dataset_name, envir = .GlobalEnv)
+      
+      # Check if PDAT column exists
+      if("PDAT" %in% names(dataset)) {
+        # Convert PDAT to factor
+        dataset$PDAT <- factor(dataset$PDAT)
+        
+        # Update the dataset in the global environment
+        assign(dataset_name, dataset, envir = .GlobalEnv)
+        
+        # Print confirmation
+        cat(paste0("Converted PDAT in ", dataset_name, " to factor\n"))
+      } else {
+        cat(paste0("No PDAT column found in ", dataset_name, "\n"))
+      }
+    } else {
+      cat(paste0("Dataset '", dataset_name, "' not found in environment\n"))
+    }
+  }
+}
+
+# To convert PDAT to factor in NISPUF10 through NISPUF22:
+convert_pdat_to_factor("NISPUF", 10, 23)
+```
+
+```{r}
+#converting variables
+rename_provwt_variable <- function(start_year, end_year) {
+  for(year in start_year:end_year) {
+    # Get dataset if it exists
+    dataset_name <- paste0("NISPUF", year)
+    if(!exists(dataset_name, envir = .GlobalEnv)) {
+      cat(paste0(dataset_name, " not found\n"))
+      next
+    }
+    
+    dataset <- get(dataset_name, envir = .GlobalEnv)
+    
+    # Check which variable exists and rename it
+    if("PROVWT" %in% names(dataset)) {
+      names(dataset)[names(dataset) == "PROVWT"] <- "PROVWT_C"
+      cat(paste0("Renamed PROVWT to PROVWT_C in ", dataset_name, "\n"))
+    } else if("PROVWT_D" %in% names(dataset)) {
+      names(dataset)[names(dataset) == "PROVWT_D"] <- "PROVWT_C"
+      cat(paste0("Renamed PROVWT_D to PROVWT_C in ", dataset_name, "\n"))
+    } else if(!("PROVWT_C" %in% names(dataset))) {
+      cat(paste0("No provider weight variable found in ", dataset_name, "\n"))
+      next
+    } else {
+      cat(paste0("PROVWT_C already exists in ", dataset_name, "\n"))
+      next
+    }
+    
+    # Update dataset in environment
+    assign(dataset_name, dataset, envir = .GlobalEnv)
+  }
+}
+
+# Run for all years
+rename_provwt_variable(10, 23)
+```
+
+
+
+
+```{r}
+# For 2010 NIS data
+# Create STRATUM column and remove ESTIAP10
+#NISPUF10$STRATUM <- NISPUF10$ESTIAP10
+#NISPUF10$ESTIAP10 <- NULL
+
+# For 2011 NIS data
+# Create STRATUM column and remove original column
+#NISPUF11$STRATUM <- NISPUF11$STRATUM_D
+#NISPUF11$STRATUM_D <- NULL
+
+```
+
+```{r}
+# Check if STRATUM exists in NISPUF10
+if("STRATUM" %in% names(NISPUF10)) {
+  cat("STRATUM column exists in NISPUF10\n")
+  # Optionally show the first few values
+  print(head(NISPUF10$STRATUM))
+} else {
+  cat("STRATUM column does NOT exist in NISPUF10\n")
+}
+
+# Check if STRATUM exists in NISPUF11
+if("STRATUM" %in% names(NISPUF11)) {
+  cat("STRATUM column exists in NISPUF11\n")
+  # Optionally show the first few values
+  print(head(NISPUF11$STRATUM))
+} else {
+  cat("STRATUM column does NOT exist in NISPUF11\n")
+}
+
+# Additional check: list all column names that contain "STRAT" in either dataset
+cat("\nColumns in NISPUF10 containing 'STRAT':\n")
+print(grep("STRAT", names(NISPUF10), value = TRUE, ignore.case = TRUE))
+
+cat("\nColumns in NISPUF11 containing 'STRAT':\n")
+print(grep("STRAT", names(NISPUF11), value = TRUE, ignore.case = TRUE))
+```
+
+
+
+```{r}
+check_vars_across_years <- function(year_start, year_end, required_vars) {
+  # Create a data frame to store results
+  results <- data.frame(
+    Variable = required_vars,
+    stringsAsFactors = FALSE
+  )
+  
+  # Loop through each year
+  for (year in year_start:year_end) {
+    # Construct dataset name
+    year_suffix <- substr(as.character(year), 3, 4)
+    dataset_name <- paste0("NISPUF", year_suffix)
+    
+    # Try to get the dataset
+    if (exists(dataset_name)) {
+      dataset <- get(dataset_name)
+      
+      # Check if each variable exists in the dataset
+      results[[paste0("NIS_", year)]] <- vapply(required_vars, function(var) {
+        var %in% names(dataset)
+      }, logical(1))
+    } else {
+      # If dataset doesn't exist, mark all variables as NA
+      results[[paste0("NIS_", year)]] <- NA
+      cat(paste0("Warning: Dataset ", dataset_name, " not found\n"))
+    }
+  }
+  
+  # Calculate overall availability (excluding NA columns)
+  na_mask <- !is.na(results[, -1])
+  if (ncol(results) > 1) {
+    results$Available_In_All <- apply(results[, -1] & na_mask, 1, all)
+  } else {
+    results$Available_In_All <- NA
+  }
+  
+  return(results)
+}
+
+# Define the variables needed for your model
+required_variables <- c("AGEGRP", "C1R", "CBF_01", "CWIC_02", 
+  "EDUC1", "FRSTBRN", "I_HISP_K", "INCPORAR", "LANGUAGE", 
+  "M_AGEGRP2", "MARITAL2", "RACE_K", "SEX", 
+  "INS_STAT2_I", "CEN_REG"
+)
+
+# Run the check for years 2010 to 2023
+var_availability <- check_vars_across_years(2010, 2023, required_variables)
+
+# Print the results
+print(var_availability)
+
+# Print a summary of missing variables
+missing_vars <- var_availability[!var_availability$Available_In_All, ]
+if (nrow(missing_vars) > 0) {
+  cat("\nVariables not available in all datasets:\n")
+  
+  # For each variable that's missing, show which datasets it's missing from
+  for (i in 1:nrow(missing_vars)) {
+    var <- missing_vars$Variable[i]
+    
+    # Get dataset columns (exclude first and last columns)
+    dataset_cols <- names(missing_vars)[-c(1, ncol(missing_vars))]
+    
+    # Find which datasets the variable is missing from (where value is FALSE)
+    missing_from <- dataset_cols[which(!missing_vars[i, dataset_cols])]
+    
+    # Remove NA datasets
+    missing_from <- missing_from[!is.na(missing_vars[i, missing_from])]
+    
+    cat(paste0(var, " is missing from: ", paste(missing_from, collapse=", "), "\n"))
+  }
+} else {
+  cat("\nAll required variables are available in all datasets!\n")
+}
+```
+
+
+
+```{r}
+standardize_nis_variables <- function(year_start, year_end) {
+  # Loop through each year
+  for (year in year_start:year_end) {
+    # Construct dataset name
+    year_suffix <- substr(as.character(year), 3, 4)
+    dataset_name <- paste0("NISPUF", year_suffix)
+    
+    # Check if dataset exists
+    if (exists(dataset_name)) {
+      cat(paste0("Processing ", dataset_name, "...\n"))
+      dataset <- get(dataset_name)
+      
+      # 1. Handle M_AGEGRP variable
+      if (year <= 2016) {
+        # For 2016-2023, change M_AGEGRP to M_AGEGRP2 if it exists
+        if ("M_AGEGRP" %in% names(dataset) && !("M_AGEGRP2" %in% names(dataset))) {
+          dataset$M_AGEGRP2 <- dataset$M_AGEGRP
+          cat("  - Converted M_AGEGRP to M_AGEGRP2\n")
+        } else if (!("M_AGEGRP" %in% names(dataset)) && !("M_AGEGRP2" %in% names(dataset))) {
+          cat("  - Warning: Neither M_AGEGRP nor M_AGEGRP2 found\n")
+        } else if ("M_AGEGRP2" %in% names(dataset)) {
+          cat("  - M_AGEGRP2 already exists\n")
+        }
+      }
+      
+      # 2. Handle insurance variable
+      if (year >= 2010 && year <= 2015) {
+        # Create INS_STAT2_I from component variables
+        if (!("INS_STAT2_I" %in% names(dataset))) {
+          # Check if we have the necessary component variables
+          required_vars <- c("INS_1", "INS_2", "INS_3", "INS_3A", "INS_4_5", "INS_6", "INS_11")
+          has_required_vars <- all(required_vars %in% names(dataset))
+          
+          if (has_required_vars) {
+            # Create a new insurance status variable based on the component variables
+            dataset$INS_STAT2_I <- NA  # Initialize with NA
+            
+            # Define insurance status based on the component variables
+            # This is a simplified example - you'll need to adjust the logic based on your specific requirements
+            # Private insurance
+            private_ins <- dataset$INS_1 == 1 | dataset$INS_6 == 1
+            # Public insurance (Medicaid or SCHIP)
+            public_ins <- dataset$INS_2 == 1 | dataset$INS_3 == 1 | dataset$INS_3A == 1 | dataset$INS_4_5 == 1
+            # No insurance
+            no_ins <- dataset$INS_11 == 1
+            
+            # Set the values
+            dataset$INS_STAT2_I[private_ins & !public_ins] <- 1  # Private only
+            dataset$INS_STAT2_I[!private_ins & public_ins] <- 2  # Public only
+            dataset$INS_STAT2_I[private_ins & public_ins] <- 3   # Both private and public
+            dataset$INS_STAT2_I[!private_ins & !public_ins & !no_ins] <- 4  # No insurance
+            
+            cat("  - Created INS_STAT2_I from component variables\n")
+          } else {
+            cat("  - Warning: Missing some insurance component variables, can't create INS_STAT2_I\n")
+          }
+        } else {
+          cat("  - INS_STAT2_I already exists\n")
+        }
+      } else if (year == 2016) {
+        # Rename INS_STAT_I to INS_STAT2_I
+        if ("INS_STAT_I" %in% names(dataset) && !("INS_STAT2_I" %in% names(dataset))) {
+          dataset$INS_STAT2_I <- dataset$INS_STAT_I
+          cat("  - Renamed INS_STAT_I to INS_STAT2_I\n")
+        } else if (!("INS_STAT_I" %in% names(dataset)) && !("INS_STAT2_I" %in% names(dataset))) {
+          cat("  - Warning: Neither INS_STAT_I nor INS_STAT2_I found\n")
+        } else if ("INS_STAT2_I" %in% names(dataset)) {
+          cat("  - INS_STAT2_I already exists\n")
+        }
+      } else {
+        # For 2017-2023, check if INS_STAT2_I exists
+        if (!("INS_STAT2_I" %in% names(dataset))) {
+          cat("  - Warning: INS_STAT2_I not found in dataset\n")
+        } else {
+          cat("  - INS_STAT2_I exists\n")
+        }
+      }
+      
+      # Assign the modified dataset back to the original name
+      assign(dataset_name, dataset, envir = .GlobalEnv)
+      cat(paste0("Completed processing ", dataset_name, "\n\n"))
+    } else {
+      cat(paste0("Warning: Dataset ", dataset_name, " not found\n\n"))
+    }
+  }
+  
+  cat("Variable standardization complete!\n")
+}
+
+# Run the function for years 2010 to 2023
+standardize_nis_variables(2010, 2023)
+```
+
+
+
+
+
+```{r}
+process_nispuf_datasets <- function(start_year, end_year) {
+  # Process each dataset in the range
+  for(year in start_year:end_year) {
+    # Construct the dataset and output names
+    dataset_name <- paste0("NISPUF", year)
+    output_name <- paste0("df", year)
+    output_name_filtered <- paste0("df", year, "2")
+    
+    # Get the dataset if it exists
+    if(exists(dataset_name, envir = .GlobalEnv)) {
+      dataset <- get(dataset_name, envir = .GlobalEnv)
+      
+      # Check if PDAT column exists
+      if("PDAT" %in% names(dataset)) {
+        # Ensure PDAT is a factor
+        if(!is.factor(dataset$PDAT)) {
+          dataset$PDAT <- factor(dataset$PDAT)
+          # Update the original dataset
+          assign(dataset_name, dataset, envir = .GlobalEnv)
+          cat(paste0("Converted PDAT in ", dataset_name, " to factor\n"))
+        }
+        
+        # Filter data to children with PDAT=1 (first level)
+        filtered_df <- dataset[dataset$PDAT == levels(dataset$PDAT)[1], ]
+        
+        # Create the first filtered dataset
+        assign(output_name, filtered_df, envir = .GlobalEnv)
+        cat(paste0("Created ", output_name, " with ", nrow(filtered_df), " rows\n"))
+        
+        # Count missing weights
+        missing_weights <- sum(is.na(filtered_df$PROVWT_C))
+        cat(paste0("Missing weights (PROVWT_C) in ", output_name, ": ", missing_weights, "\n"))
+        
+        # Filter out rows with missing weights
+        final_df <- subset(filtered_df, !is.na(PROVWT_C))
+        
+        # Create the second filtered dataset 
+        assign(output_name_filtered, final_df, envir = .GlobalEnv)
+        cat(paste0("Created ", output_name_filtered, " with ", nrow(final_df), " rows after removing missing weights\n"))
+        
+      } else {
+        cat(paste0("No PDAT column found in ", dataset_name, "\n"))
+      }
+    } else {
+      cat(paste0("Dataset '", dataset_name, "' not found in environment\n"))
+    }
+  }
+}
+
+# To process datasets from year 10 to 22:
+process_nispuf_datasets(10, 23)
+```
+```{r}
+create_vaccine_indicators_all_years <- function(start_year, end_year) {
+  # Loop through each year
+  for(year in start_year:end_year) {
+    # Construct the dataset name
+    df_name <- paste0("df", year, "2")
+    
+    # Check if dataset exists
+    if(!exists(df_name, envir = .GlobalEnv)) {
+      cat(paste0("Dataset ", df_name, " not found for year ", year, "\n"))
+      next  # Skip to next year if dataset doesn't exist
+    }
+    
+    cat(paste0("\nProcessing indicators for year ", year, ":\n"))
+    
+    # Get the dataset
+    df <- get(df_name, envir = .GlobalEnv)
+    
+    # Define thresholds for each vaccine
+    vaccine_info <- list(
+      DTaP = list(column = "P_NUMDTP", threshold = 4),
+      Polio = list(column = "P_NUMPOL", threshold = 3),
+      MMR = list(column = "P_NUMMMR", threshold = 1),
+      Hib = list(column = "P_NUMHIB", threshold = 3),
+      HepB = list(column = "P_NUMHEP", threshold = 3),
+      Varicella = list(column = "P_NUMVRC", threshold = 1),
+      PCV = list(column = "P_NUMPCV", threshold = 4),
+      Influenza = list(column = "P_NUMFLU", threshold = 1),
+      HepA = list(column = "P_NUMHEA", threshold = 2),
+      Rotavirus = list(column = "P_NUMROT", threshold = 2)
+    )
+    
+    # Create binary indicators for each vaccine
+    for(vaccine in names(vaccine_info)) {
+      col_name <- vaccine_info[[vaccine]]$column
+      threshold <- vaccine_info[[vaccine]]$threshold
+      
+      # Create new column name with year suffix
+      new_col_name <- paste0(vaccine, "_Coverage_", year)
+      
+      # Check if column exists in dataset
+      if(col_name %in% names(df)) {
+        # Create binary indicator
+        df[[new_col_name]] <- ifelse(is.na(df[[col_name]]), NA, 
+                                   ifelse(df[[col_name]] >= threshold, 1, 0))
+        cat(paste0("  Created ", new_col_name, "\n"))
+      } else {
+        cat(paste0("  Column ", col_name, " not found in dataset for year ", year, "\n"))
+      }
+    }
+    
+    # Update the dataset in the global environment
+    assign(df_name, df, envir = .GlobalEnv)
+    cat(paste0("✓ Completed processing for year ", year, "\n"))
+  }
+  
+  cat("\nFinished creating vaccine coverage indicators for all years.\n")
+}
+
+# Run for all years from 2010 to 2023
+create_vaccine_indicators_all_years(10, 23)
+```
+```{r}
+
+create_survey_design <- function(start_year, end_year) {
+  # Track successful years
+  successful_years <- c()
+  
+  for(year in start_year:end_year) {
+    # Construct dataset name
+    df_name <- paste0("df", year, "2")
+    
+    # Check if dataset exists
+    if(!exists(df_name, envir= .GlobalEnv)) {
+      cat(paste0("Dataset ", df_name, " not found for year ", year, "\n"))
+      next  # Skip to next year
+    }
+    
+    # Construct design name
+    design_name <- paste0("nis_design", year)
+    
+    # Get the dataset
+    df <- get(df_name,envir= .GlobalEnv)
+    
+    # Create the survey design
+    tryCatch({
+      design_obj <- survey::svydesign(
+        id = ~SEQNUMC,
+        strata = ~STRATUM,
+        weights = ~PROVWT_C,
+        data = df
+      )
+      
+      # Assign to environment
+      assign(design_name, design_obj, envir= .GlobalEnv)
+      
+      # Report success
+      cat(paste0("Created survey design object '", design_name, "' for year ", year, "\n"))
+      
+      # Add to successful years list
+      successful_years <- c(successful_years, year)
+      
+    }, error = function(e) {
+      cat(paste0("Error creating survey design for year ", year, ": ", e$message, "\n"))
+    })
+  }
+  
+  # Final status message
+  cat("\nFinished creating survey design objects for years: ", 
+      paste(successful_years, collapse=", "), "\n")
+  cat("\n==== FUNCTION COMPLETED SUCCESSFULLY ====\n")
+}
+create_survey_design(10, 23)
+```
+
+
+
+
+
+```{r}
+# Function to compute confidence intervals for each vaccine for a given year
+compute_vaccine_ci <- function(year) {
+  # List of vaccines to analyze
+  vaccines <- c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus")
+  
+  # Get the survey design object for this year
+  design_name <- paste0("nis_design", year)
+  
+  # Check if the survey design exists
+  if (!exists(design_name, envir = .GlobalEnv)) {
+    warning(paste("Survey design", design_name, "not found for year", year))
+    return(NULL)
+  }
+  
+  # Get the survey design object
+  survey_design <- get(design_name, envir = .GlobalEnv)
+  
+  # Process each vaccine
+  for (vaccine in vaccines) {
+    # Construct the coverage variable name
+    coverage_var <- paste0(vaccine, "_Coverage_", year)
+    
+    # Construct the formula for svymean
+    formula_str <- paste0("~", coverage_var)
+    formula_obj <- as.formula(formula_str)
+    
+    # Create model name
+    model_name <- paste0("ci_", vaccine, "_", year)
+    
+    # Try to compute the confidence interval
+    tryCatch({
+      # Compute the confidence interval
+      ci_result <- svymean(formula_obj, survey_design, na.rm = TRUE)
+      
+      # Assign to global environment
+      assign(model_name, ci_result, envir = .GlobalEnv)
+      
+      # Print success message
+      cat(paste("Created confidence interval", model_name, "for year", year, "\n"))
+      
+    }, error = function(e) {
+      warning(paste("Error computing CI for", vaccine, "in year", year, ":", e$message))
+    })
+  }
+  
+  cat(paste("\nCompleted confidence interval calculations for year", year, "\n"))
+}
+
+# Function to compute CIs for a range of years
+compute_all_vaccine_ci <- function(start_year, end_year) {
+  cat("Starting confidence interval computations for years", start_year, "to", end_year, "\n\n")
+  
+  for (year in start_year:end_year) {
+    cat(paste("\n---- Processing Year 20", year, " ----\n", sep=""))
+    compute_vaccine_ci(year)
+  }
+  
+  cat("\n==== CONFIDENCE INTERVAL COMPUTATIONS COMPLETED ====\n")
+}
+
+# Usage:
+compute_all_vaccine_ci(10, 23)  # For years 2010-2023
+```
+
+
+
+
+```{r}
+# Function to generate confidence interval results for a given year
+generate_ci_results <- function(year) {
+  # List of vaccines to analyze
+  vaccines <- c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus")
+  
+  # Debugging function to check model existence
+  check_model_exists <- function(model_name) {
+    exists(model_name, envir = .GlobalEnv)
+  }
+  
+  # Create data frame with confidence interval results
+  ci_results <- data.frame(
+    Year = year,
+    Vaccine = vaccines,
+    Mean = NA,
+    Lower_CI = NA,
+    Upper_CI = NA
+  )
+  
+  # Populate results for each vaccine
+  for (i in seq_along(vaccines)) {
+    vaccine <- vaccines[i]
+    model_name <- paste0("ci_", vaccine, "_", year)
+    
+    # Check if model exists in global environment
+    if (exists(model_name, envir = .GlobalEnv)) {
+      # Retrieve the model
+      model <- get(model_name, envir = .GlobalEnv)
+      
+      # Extract confidence intervals
+      ci_results$Mean[i] <- coef(model)
+      ci_interval <- confint(model)
+      ci_results$Lower_CI[i] <- ci_interval[1]
+      ci_results$Upper_CI[i] <- ci_interval[2]
+    } else {
+      warning(paste("Model", model_name, "not found"))
+    }
+  }
+  
+  return(ci_results)
+}
+
+# Generate results for years 2010 to 2023
+ci_results_all_years <- do.call(rbind, lapply(10:23, generate_ci_results))
+
+# View results
+print(ci_results_all_years)
+
+# Optional: Save results to a CSV
+write.csv(ci_results_all_years, "vaccine_ci_results.csv", row.names = FALSE)
+```
+
+
+
+
+
+
+```{r}
+# Function to create confidence interval plots for a specific year
+create_vaccine_ci_plots <- function(year, ci_results) {
+  # Ensure the input is a single year's data
+  year_data <- subset(ci_results, Year == year)
+  
+  # Create a plot for each vaccine
+  vaccine_plots <- lapply(unique(year_data$Vaccine), function(vaccine) {
+    # Subset data for the current vaccine
+    vaccine_data <- subset(year_data, Vaccine == vaccine)
+    
+    # Create the plot
+    p <- ggplot(vaccine_data, aes(x = Vaccine, y = Mean)) +
+      geom_point(color = "blue", size = 3) +  # Mean estimate
+      geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), width = 0.2, color = "red") + # Confidence intervals
+      ylim(0, 1) +  # Set y-axis limits for proportion representation
+      labs(title = paste(vaccine, "Coverage with 95% Confidence Interval (", year, ")"),
+           y = "Proportion Vaccinated",
+           x = "Vaccine") +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels for readability
+    
+    return(p)
+  })
+  
+  # Return the list of plots
+  return(vaccine_plots)
+}
+
+# Function to plot and save all year plots
+plot_all_years_vaccines <- function(ci_results, output_dir = "vaccine_plots") {
+  # Create output directory if it doesn't exist
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+  # Get unique years
+  years <- unique(ci_results$Year)
+  
+  # Create plots for each year
+  for (year in years) {
+    # Generate plots for the current year
+    year_plots <- create_vaccine_ci_plots(year, ci_results)
+    
+    # Save each plot
+    for (i in seq_along(year_plots)) {
+      vaccine <- unique(ci_results[ci_results$Year == year, "Vaccine"])[i]
+      filename <- file.path(output_dir, paste0(year, "_", vaccine, "_coverage_plot.png"))
+      
+      # Save the plot
+      ggsave(filename, plot = year_plots[[i]], width = 8, height = 6)
+    }
+    
+    # Optional: Print plots to viewer
+    print(year_plots)
+  }
+}
+
+# Call the plot function
+plot_all_years_vaccines(ci_results_all_years)
+```
+
+
+
+
+```{r}
+library(ggplot2)
+library(gridExtra)
+library(grid)
+
+# Create output directory if it doesn't exist
+output_dir <- "vaccine_plots"
+if (!dir.exists(output_dir)) {
+  dir.create(output_dir, recursive = TRUE)
+}
+
+# Convert abbreviated years to full years
+ci_results_all_years$Full_Year <- ci_results_all_years$Year + 2000
+
+# Create a list to store all the individual plots
+plot_list <- list()
+
+# Create a shared y-axis title
+y_axis_title <- textGrob("Proportion Vaccinated", 
+                        gp = gpar(fontsize = 12, fontface = "bold"), 
+                        rot = 90)
+
+# Create a shared x-axis title
+x_axis_title <- textGrob("Year", 
+                        gp = gpar(fontsize = 12, fontface = "bold"))
+
+for (vaccine in unique(ci_results_all_years$Vaccine)) {
+  # Subset data for the current vaccine
+  vaccine_data <- subset(ci_results_all_years, Vaccine == vaccine)
+  
+  # Create the plot for this vaccine
+  p <- ggplot(vaccine_data, aes(x = Full_Year, y = Mean)) +
+    # First add manual grid lines that are perfectly square
+    geom_vline(xintercept = seq(2010, 2023, by = 1), color = "gray95", linewidth = 0.5) +
+    geom_hline(yintercept = seq(0.5, 1, by = 0.05), color = "gray95", linewidth = 0.5) +
+    
+    # Add confidence interval error bars
+    geom_errorbar(aes(ymin = Lower_CI, ymax = Upper_CI), 
+                  color = "red", 
+                  width = 0.3) +
+    
+    geom_point(color = "blue", size = 2) +  # Fixed blue color
+    geom_line(color = "blue", linewidth= 0.5) +  # Fixed blue color
+    
+    scale_y_continuous(limits = c(0.5, 1), breaks = c(0.5, 0.75, 1.0)) +
+    scale_x_continuous(breaks = seq(2010, 2023, by = 1)) +
+    
+    labs(title = vaccine) +
+    theme_minimal() +
+    theme(
+      panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank(),
+      axis.line = element_line(color = "black", linewidth = 0.8),
+      axis.ticks = element_line(color = "black", linewidth = 0.8),
+      axis.text = element_text(color = "black", size = 8),
+      plot.title = element_text(size = 12, face = "bold", hjust = 0.5),
+      axis.title = element_blank(),
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+      axis.text.y = element_text(size = 8),
+      plot.margin = margin(5, 5, 5, 5)
+    )
+  
+  # Add the plot to our list
+  plot_list[[vaccine]] <- p
+  
+  # Save individual vaccine plots
+  individual_plot_filename <- file.path(output_dir, paste0(vaccine, "_coverage_trends2.png"))
+  ggsave(individual_plot_filename, p, width = 6, height = 4, dpi = 300)
+}
+
+# Determine grid dimensions for a roughly square layout
+n_plots <- length(plot_list)
+n_cols <- ceiling(sqrt(n_plots))
+n_rows <- ceiling(n_plots / n_cols)
+
+# Arrange all plots in a grid with shared axis titles
+combined_plot2 <- grid.arrange(
+  grobs = plot_list,
+  ncol = n_cols,
+  left = y_axis_title,
+  bottom = x_axis_title
+)
+
+# Save the combined plot
+combined_plot_filename <- file.path(output_dir, "vaccine_coverage_trends2.png")
+ggsave(combined_plot_filename, combined_plot2, 
+       width = n_cols * 3 + 1, height = n_rows * 2.5 + 1, dpi = 300)
+
+# Display the grid of plots
+print(combined_plot2)
+```
+
+
+
+
+
+
+
+
+
+```{r}
+# Function to create vaccine coverage variables for a given year
+create_vaccine_variables <- function(year) {
+  # Get the dataset for this year
+  df_name <- paste0("df", year, "2")
+  
+  if(!exists(df_name, envir = .GlobalEnv)) {
+    warning(paste("Dataset", df_name, "not found for year", year))
+    return(NULL)
+  }
+  
+  # Get the dataset
+  df <- get(df_name, envir = .GlobalEnv)
+  
+  # Define the vaccines for the combined 7-vaccine series (4:3:1:3*:3:1:4)
+  combined_vaccines <- c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV")
+  
+  # Define additional vaccines
+  additional_vaccines <- c("HepA", "Rotavirus", "Influenza")
+  
+  # Check if coverage columns exist for this year
+  coverage_cols <- character(0)
+  
+  # Try two patterns for coverage columns
+  pattern1 <- paste0("_Coverage_", year)
+  pattern2 <- "_Coverage"
+  
+  for (vaccine in c(combined_vaccines, additional_vaccines)) {
+    col1 <- paste0(vaccine, pattern1)
+    col2 <- paste0(vaccine, pattern2)
+    
+    if (col1 %in% names(df)) {
+      coverage_cols[vaccine] <- col1
+    } else if (col2 %in% names(df)) {
+      coverage_cols[vaccine] <- col2
+    } else {
+      warning(paste("No coverage column found for", vaccine, "in year", year))
+    }
+  }
+  
+  # If we found coverage columns for all 7 combined vaccines, create the Combined7VaccineSeries variable
+  if (all(combined_vaccines %in% names(coverage_cols))) {
+    # Create conditions checking that each vaccine coverage equals 1
+    conditions <- paste0("df$", coverage_cols[combined_vaccines], " == 1")
+    condition_expr <- paste(conditions, collapse = " & ")
+    
+    # Create Combined7VaccineSeries variable
+    df$Combined7VaccineSeries <- eval(parse(text = paste0("ifelse(", condition_expr, ", 1, 0)")))
+    
+    cat(paste("Created Combined7VaccineSeries variable for year", year, "\n"))
+    cat(paste("Fully vaccinated (7-vaccine series):", sum(df$Combined7VaccineSeries, na.rm=TRUE), 
+              "out of", nrow(df), "children", 
+              "(", round(mean(df$Combined7VaccineSeries, na.rm=TRUE)*100, 1), "%)\n"))
+  } else {
+    warning(paste("Could not create Combined7VaccineSeries for year", year, 
+                  "- missing some vaccine coverage variables"))
+  }
+  
+  # Create individual variables for additional vaccines if they exist
+  for (vaccine in additional_vaccines) {
+    if (vaccine %in% names(coverage_cols)) {
+      var_name <- paste0(vaccine, "Covered")
+      df[[var_name]] <- df[[coverage_cols[vaccine]]]
+      
+      cat(paste("Created", var_name, "variable for year", year, "\n"))
+      cat(paste(vaccine, "vaccinated:", sum(df[[var_name]], na.rm=TRUE), 
+                "out of", nrow(df), "children", 
+                "(", round(mean(df[[var_name]], na.rm=TRUE)*100, 1), "%)\n"))
+    }
+  }
+  
+  # Save back to the global environment
+  assign(df_name, df, envir = .GlobalEnv)
+  
+  return(invisible(NULL))
+}
+
+# Function to create vaccine variables for multiple years
+create_vaccine_vars_for_years <- function(start_year, end_year) {
+  cat("Creating vaccine coverage variables for years", start_year, "to", end_year, "\n\n")
+  
+  for (year in start_year:end_year) {
+    cat(paste("\n---- Processing Year 20", year, " ----\n", sep=""))
+    create_vaccine_variables(year)
+  }
+  
+  cat("\n==== ALL VARIABLES CREATED SUCCESSFULLY ====\n")
+}
+
+# Example usage:
+create_vaccine_vars_for_years(10, 23)  # For years 2010-2023
+```
+
+
+```{r}
+# Function to recreate survey design objects after adding AllVaccinesCovered
+recreate_survey_design <- function(start_year, end_year) {
+  cat("Recreating survey design objects for years", start_year, "to", end_year, "\n\n")
+  
+  successful_years <- c()
+  
+  for(year in start_year:end_year) {
+    # Construct dataset name
+    df_name <- paste0("df", year, "2")
+    
+    # Check if dataset exists
+    if(!exists(df_name, envir = .GlobalEnv)) {
+      cat(paste0("Dataset ", df_name, " not found for year ", year, "\n"))
+      next  # Skip to next year
+    }
+    
+    # Construct design name
+    design_name <- paste0("nis_design", year)
+    
+    # Get the dataset
+    df <- get(df_name, envir = .GlobalEnv)
+    
+    # Create the survey design
+    tryCatch({
+      # Check if required columns exist
+      required_cols <- c("SEQNUMC", "STRATUM", "PROVWT_C")
+      missing_cols <- required_cols[!required_cols %in% names(df)]
+      
+      if(length(missing_cols) > 0) {
+        cat(paste0("Missing required columns for survey design in year ", year, ": ", 
+                  paste(missing_cols, collapse=", "), "\n"))
+        next  # Skip to next year
+      }
+      
+      # Create the survey design object
+      design_obj <- survey::svydesign(
+        id = ~SEQNUMC,
+        strata = ~STRATUM,
+        weights = ~PROVWT_C,
+        data = df
+      )
+      
+      # Assign to environment
+      assign(design_name, design_obj, envir = .GlobalEnv)
+      
+      # Report success
+      cat(paste0("Recreated survey design object '", design_name, "' for year ", year, "\n"))
+      
+      # Add to successful years list
+      successful_years <- c(successful_years, year)
+      
+    }, error = function(e) {
+      cat(paste0("Error creating survey design for year ", year, ": ", e$message, "\n"))
+    })
+  }
+  
+  # Final status message
+  if(length(successful_years) > 0) {
+    cat("\nSuccessfully recreated survey design objects for years: ", 
+        paste(successful_years, collapse=", "), "\n")
+  } else {
+    cat("\nNo survey design objects were successfully created.\n")
+  }
+  
+  cat("\n==== SURVEY DESIGN RECREATION COMPLETED ====\n")
+}
+
+# Usage:
+recreate_survey_design(10, 23)  #
+```
+
+
+
+
+```{r}
+# Function to analyze vaccine coverage for a given year and vaccine
+analyze_vaccine_coverage <- function(year, vaccine_var) {
+  # Get the survey design object for this year
+  design_name <- paste0("nis_design", year)
+  
+  if(!exists(design_name, envir = .GlobalEnv)) {
+    warning(paste("Survey design", design_name, "not found for year", year))
+    return(NULL)
+  }
+  
+  # Get the survey design
+  survey_design <- get(design_name, envir = .GlobalEnv)
+  
+  # Get the dataset to check column existence
+  df_name <- paste0("df", year, "2")
+  if(!exists(df_name, envir = .GlobalEnv)) {
+    warning(paste("Dataset", df_name, "not found for year", year))
+    return(NULL)
+  }
+  df <- get(df_name, envir = .GlobalEnv)
+  
+  # Check if the vaccine variable exists
+  if(!(vaccine_var %in% names(df))) {
+    warning(paste(vaccine_var, "variable not found in dataset for year", year))
+    return(NULL)
+  }
+  
+  # Format the vaccine name for output
+  vaccine_label <- gsub("Covered$", "", vaccine_var)
+  if(vaccine_var == "Combined7VaccineSeries") {
+    vaccine_label <- "7-Vaccine Series (4:3:1:3*:3:1:4)"
+  }
+  
+  # Store results
+  results <- list()
+  
+  # 1. Calculate the overall coverage rate
+  cat(paste0("\n--- ", vaccine_label, " Coverage Rate for Year 20", year, " ---\n"))
+  tryCatch({
+    # Create formula dynamically
+    formula_str <- paste0("~", vaccine_var)
+    formula_obj <- as.formula(formula_str)
+    
+    coverage <- svymean(formula_obj, design = survey_design, na.rm = TRUE)
+    print(coverage)
+    
+    # Store in results
+    results$coverage <- coverage
+    
+    # Also save to global environment with year-specific name
+    coverage_name <- paste0(vaccine_var, "_coverage_", year)
+    assign(coverage_name, coverage, envir = .GlobalEnv)
+    
+  }, error = function(e) {
+    warning(paste("Error calculating", vaccine_label, "coverage for year", year, ":", e$message))
+  })
+  
+  # 2. Run the logistic regression model
+  # List of predictor variables to check
+  predictors <- c("AGEGRP", "C1R", "CBF_01", "CWIC_02", "EDUC1", "FRSTBRN", 
+                 "I_HISP_K", "INCPORAR", "LANGUAGE", "M_AGEGRP2", "MARITAL2",
+                 "RACE_K", "SEX", "INS_STAT2_I", "CEN_REG")
+  
+  # Check which predictors exist in this dataset
+  available_predictors <- predictors[predictors %in% names(df)]
+  missing_predictors <- predictors[!predictors %in% names(df)]
+  
+  if(length(missing_predictors) > 0) {
+    cat("\nNote: The following predictor variables are missing for year", year, ":\n")
+    cat(paste(" -", missing_predictors), sep = "\n")
+  }
+  
+  if(length(available_predictors) > 0) {
+    # Create formula for the model
+    formula_str <- paste(vaccine_var, "~", paste(available_predictors, collapse = " + "))
+    formula_obj <- as.formula(formula_str)
+    
+    cat(paste0("\n--- Running Logistic Regression for ", vaccine_label, " (Year 20", year, ") ---\n"))
+    cat("Model formula:", formula_str, "\n\n")
+    
+    tryCatch({
+      # Run the logistic regression
+      logistic_model <- svyglm(formula_obj, 
+                              design = survey_design, 
+                              family = quasibinomial())
+      
+      # Create abbreviated variable name for saving
+      short_var <- ifelse(vaccine_var == "Combined7VaccineSeries", "SERIES7", 
+                         gsub("Covered$", "", vaccine_var))
+      
+      # Save to global environment
+      model_name <- paste0("logistic_model_", short_var, "_", year)
+      assign(model_name, logistic_model, envir = .GlobalEnv)
+      
+      # Store in results
+      results$logistic_model <- logistic_model
+      
+      # Print summary
+      model_summary <- summary(logistic_model)
+      print(model_summary)
+      
+      # Also save summary to global environment
+      summary_name <- paste0("summary_logistic_", short_var, "_", year)
+      assign(summary_name, model_summary, envir = .GlobalEnv)
+      
+      cat("\nModel saved as", model_name, "in the global environment\n")
+      
+    }, error = function(e) {
+      warning(paste("Error running logistic regression for", vaccine_label, "in year", year, ":", e$message))
+    })
+  } else {
+    warning("No predictor variables available for year", year)
+  }
+  
+  return(invisible(results))
+}
+
+# Function to analyze all vaccines for a given year
+analyze_year_vaccines <- function(year) {
+  cat("\n\n========== ANALYZING YEAR 20", year, " ==========\n", sep="")
+  
+  # List of vaccine variables to analyze
+  vaccine_vars <- c("Combined7VaccineSeries", "HepACovered", "InfluenzaCovered", "RotavirusCovered")
+  
+  # Analyze each vaccine
+  for(vaccine_var in vaccine_vars) {
+    analyze_vaccine_coverage(year, vaccine_var)
+  }
+}
+
+# Function to run analysis for all years
+analyze_all_years <- function(start_year, end_year) {
+  cat("=== Running Vaccine Coverage Analysis for Years", start_year, "to", end_year, "===\n")
+  
+  for(year in start_year:end_year) {
+    analyze_year_vaccines(year)
+  }
+  
+  cat("\n\n=== COMPLETED ALL ANALYSES ===\n")
+}
+
+# Usage:
+analyze_all_years(10, 23)  # For years 2010-2023
+```
+
+
+
+
+
+```{r}
+# Function to calculate odds ratios and 95% CIs from saved models
+generate_odds_ratios <- function(start_year, end_year, vaccine_vars) {
+  for (year in start_year:end_year) {
+    for (vaccine_var in vaccine_vars) {
+      
+      # Define short variable name used for saved model names
+      short_var <- ifelse(vaccine_var == "Combined7VaccineSeries", "SERIES7",
+                          gsub("Covered$", "", vaccine_var))
+      
+      model_name <- paste0("logistic_model_", short_var, "_", year)
+      
+      if (exists(model_name, envir = .GlobalEnv)) {
+        model <- get(model_name, envir = .GlobalEnv)
+        
+        # Compute odds ratios and 95% CIs
+        or_table <- cbind(
+          OR = exp(coef(model)),
+          LowerCI = exp(confint(model)[,1]),
+          UpperCI = exp(confint(model)[,2])
+        )
+        
+        # Round and print results
+        cat("\n===== Odds Ratios for", vaccine_var, "Year 20", year, "=====\n")
+        print(round(or_table, 3))
+        
+        # Save to global environment if needed
+        or_name <- paste0("odds_ratios_", short_var, "_", year)
+        assign(or_name, or_table, envir = .GlobalEnv)
+        
+      } else {
+        warning(paste("Model", model_name, "not found. Skipping year", year, "vaccine", vaccine_var))
+      }
+    }
+  }
+}
+
+# Run it
+generate_odds_ratios(
+  start_year = 10,
+  end_year = 23,
+  vaccine_vars = c("Combined7VaccineSeries", "HepACovered", "InfluenzaCovered", "RotavirusCovered")
+)
+```
+
+
+
+
+
+
+
+```{r}
+# Function to calculate odds ratios and 95% CIs from saved models
+generate_odds_ratios <- function(start_year, end_year, vaccine_vars) {
+  significant_results <- list()  # to collect all significant ORs
+  
+  for (year in start_year:end_year) {
+    for (vaccine_var in vaccine_vars) {
+      
+      # Define short variable name used in model names
+      short_var <- ifelse(vaccine_var == "Combined7VaccineSeries", "SERIES7",
+                          gsub("Covered$", "", vaccine_var))
+      
+      model_name <- paste0("logistic_model_", short_var, "_", year)
+      
+      if (exists(model_name, envir = .GlobalEnv)) {
+        model <- get(model_name, envir = .GlobalEnv)
+        pvals <- summary(model)$coefficients[, 4]
+        
+        # Compute odds ratios and 95% CIs
+        or_table <- cbind(
+          OR = exp(coef(model)),
+          LowerCI = exp(confint(model)[, 1]),
+          UpperCI = exp(confint(model)[, 2]),
+          p_value = pvals
+        )
+        
+        # Print all ORs
+        cat("\n===== Odds Ratios for", vaccine_var, "Year 20", year, "=====\n")
+        print(round(or_table, 3))
+        
+        # Save all ORs to environment
+        or_name <- paste0("odds_ratios_", short_var, "_", year)
+        assign(or_name, or_table, envir = .GlobalEnv)
+        
+        # Filter significant ones (p < 0.05)
+        significant_or <- or_table[pvals < 0.05, ]
+        if (nrow(significant_or) > 0) {
+          sig_df <- data.frame(
+            Variable = rownames(significant_or),
+            Year = paste0("20", year),
+            Vaccine = vaccine_var,
+            round(significant_or, 3),
+            row.names = NULL
+          )
+          significant_results[[paste0(vaccine_var, "_", year)]] <- sig_df
+        }
+        
+      } else {
+        warning(paste("Model", model_name, "not found. Skipping."))
+      }
+    }
+  }
+  
+  # Combine all significant ORs into one table
+  if (length(significant_results) > 0) {
+    all_significant_or <- do.call(rbind, significant_results)
+    assign("significant_odds_ratios_all_years", all_significant_or, envir = .GlobalEnv)
+    
+    cat("\n\n=== Combined Significant Odds Ratios Across All Years ===\n")
+    print(all_significant_or)
+  } else {
+    cat("\nNo significant predictors found (p < 0.05).\n")
+  }
+}
+generate_odds_ratios(
+  start_year = 10,
+  end_year = 23,
+  vaccine_vars = c("Combined7VaccineSeries", "HepACovered", "InfluenzaCovered", "RotavirusCovered")
+)
+
+```
+
+
+```{r}
+# Function to create a visualization of predictor significance across years for the 7-vaccine series
+create_significance_heatmap_7series <- function(start_year, end_year) {
+  # Define all possible predictors in a more logical order
+  # Child characteristics first, then household/maternal factors
+  all_predictors <- c(
+    # Child characteristics
+    "AGEGRP",      # Age Group
+    "SEX",         # Gender
+    "RACE_K",      # Race
+    "I_HISP_K",    # Hispanic Origin
+    "FRSTBRN",     # First Born Status
+    "CWIC_02",     # WIC Status
+    "CBF_01",      # Breastfeeding History
+    "INS_STAT2_I", # Insurance Coverage
+    
+    # Household/family characteristics
+    "INCPORAR",    # Income to Poverty Ratio
+    "CEN_REG",     # Census Region
+    "C1R",         # Household Size
+    "LANGUAGE",    # Interview Language
+    "M_AGEGRP2",   # Mother's Age
+    "EDUC1",       # Maternal Education
+    "MARITAL2"     # Marital Status
+  )
+  
+  # Define readable labels for predictors
+  predictor_labels <- c(
+    "AGEGRP" = "Age Group",
+    "SEX" = "Gender",
+    "RACE_K" = "Race",
+    "I_HISP_K" = "Hispanic Origin",
+    "FRSTBRN" = "First Born Status",
+    "CWIC_02" = "WIC Status",
+    "CBF_01" = "Breastfeeding History",
+    "INS_STAT2_I" = "Insurance Coverage",
+    "INCPORAR" = "Income to Poverty Ratio",
+    "CEN_REG" = "Census Region",
+    "C1R" = "Household Size",
+    "LANGUAGE" = "Interview Language",
+    "M_AGEGRP2" = "Mother's Age",
+    "EDUC1" = "Maternal Education",
+    "MARITAL2" = "Marital Status"
+  )
+  
+  # Create a matrix to store significance and direction
+  years <- start_year:end_year
+  num_years <- length(years)
+  num_predictors <- length(all_predictors)
+  
+  # Initialize matrix for significance values
+  # 0 = not in model, 1 = not significant, 2 = positive significant, 3 = negative significant
+  significance_matrix <- matrix(0, nrow = num_predictors, ncol = num_years)
+  rownames(significance_matrix) <- all_predictors
+  colnames(significance_matrix) <- paste0("20", years)
+  
+  # Loop through each year and extract significance
+  for (i in 1:num_years) {
+    year <- years[i]
+    model_name <- paste0("logistic_model_SERIES7_", year)
+    
+    # Check if model exists
+    if (!exists(model_name, envir = .GlobalEnv)) {
+      cat(paste("Model", model_name, "not found for year", year, "\n"))
+      next
+    }
+    
+    # Get the model
+    model <- get(model_name, envir = .GlobalEnv)
+    
+    # Get summary
+    model_summary <- summary(model)
+    
+    # Extract coefficients and p-values
+    coefs <- model_summary$coefficients
+    
+    # Loop through predictors
+    for (j in 1:num_predictors) {
+      predictor <- all_predictors[j]
+      
+      # Check for exact match or match at beginning of coefficient name
+      # (handling categorical variables with multiple levels)
+      predictor_matches <- grep(paste0("^", predictor, "$|^", predictor, "\\."), rownames(coefs))
+      
+      if (length(predictor_matches) > 0) {
+        # Get p-values and coefficients for all matches
+        p_values <- coefs[predictor_matches, 4]
+        coef_values <- coefs[predictor_matches, 1]
+        
+        # Find the index of the minimum p-value
+        min_p_index <- which.min(p_values)
+        min_p <- p_values[min_p_index]
+        coef_sign <- sign(coef_values[min_p_index])
+        
+        # Set significance (0 = not in model, 1 = not significant, 
+        #                   2 = positive significant, 3 = negative significant)
+        if (min_p < 0.05) {
+          significance_matrix[j, i] <- ifelse(coef_sign > 0, 2, 3)
+        } else {
+          significance_matrix[j, i] <- 1
+        }
+      }
+    }
+  }
+  
+  # Create a data frame for plotting
+  plot_data <- data.frame()
+  for (i in 1:num_predictors) {
+    for (j in 1:num_years) {
+      plot_data <- rbind(plot_data, data.frame(
+        Predictor = predictor_labels[all_predictors[i]],  # Use readable labels
+        PredictorOrder = i,  # Keep original order
+        Year = colnames(significance_matrix)[j],
+        Significance = significance_matrix[i, j]
+      ))
+    }
+  }
+  
+  # Save the data for plotting
+  write.csv(plot_data, "7series_significance_data.csv", row.names = FALSE)
+  
+  # Create plot using ggplot2
+  if (requireNamespace("ggplot2", quietly = TRUE)) {
+    library(ggplot2)
+    
+    # Convert Significance to factor
+    plot_data$Significance <- factor(plot_data$Significance, 
+                                   levels = c(1, 2, 3),
+                                   labels = c("Not significant", 
+                                             "Positive Association", "Negative Association"))
+    
+    # Create custom color palette
+    significance_colors <- c("gray90", "darkgreen", "red")
+    
+    # Create the plot
+    p <- ggplot(plot_data, aes(x = Year, y = reorder(Predictor, -PredictorOrder), fill = Significance)) +
+      geom_tile(color = "white", linewidth = 0.7) +
+      scale_fill_manual(values = significance_colors) +
+      theme_minimal() +
+      theme(
+        # Increased font sizes and added bold
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14, face = "bold"),
+        axis.text.y = element_text(size = 14, face = "bold"),
+        axis.title.x = element_text(size = 16, face = "bold", margin = margin(t = 20)),
+        axis.title.y = element_text(size = 16, face = "bold", margin = margin(r = 20)),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        legend.position = "right",
+        legend.title = element_text(size = 14, face = "bold"),
+        legend.text = element_text(size = 13),
+        plot.title = element_text(hjust = 0.5, size = 18, face = "bold", margin = margin(b = 15)),
+        plot.subtitle = element_text(hjust = 0.5, size = 14, margin = margin(b = 20)),
+        plot.margin = margin(20, 20, 20, 20)
+      ) +
+      labs(
+        title = "7-Vaccine Series Predictors",
+        subtitle = "4:3:1:3*:3:1:4 series (DTaP, polio, MMR, Hib, HepB, varicella, PCV)",
+        x = "Year",
+        y = "",
+        fill = "Significance"
+      )
+    
+    # Print the plot
+    print(p)
+    
+    # Save the plot with larger dimensions
+    ggsave("7series_significance_heatmap.png", p, width = 14, height = 10, dpi = 300, bg = "white")
+    cat("Visualization saved as '7series_significance_heatmap.png'\n")
+  } else {
+    cat("Package 'ggplot2' is required for plotting. Install it with install.packages('ggplot2')\n")
+    cat("Data saved to '7series_significance_data.csv' for manual plotting\n")
+  }
+  
+  # Return the significance matrix
+  return(invisible(significance_matrix))
+}
+
+# Usage:
+create_significance_heatmap_7series(10, 23)  # For years 2010-2023
+```
+
+
+
+```{r}
+# Function to run logistic regression models for individual vaccines across years
+analyze_individual_vaccines <- function(start_year, end_year) {
+  # List of vaccines to analyze in the specified order
+  vaccines <- c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus")
+  
+  # List of predictor variables in the logical order
+  # Child characteristics first, then household/maternal factors
+  predictors <- c(
+    # Child characteristics
+    "AGEGRP",      # Age Group
+    "SEX",         # Gender
+    "RACE_K",      # Race
+    "I_HISP_K",    # Hispanic Origin
+    "FRSTBRN",     # First Born Status
+    "CWIC_02",     # WIC Status
+    "CBF_01",      # Breastfeeding History
+    "INS_STAT2_I", # Insurance Coverage
+    
+    # Household/family characteristics
+    "INCPORAR",    # Income to Poverty Ratio
+    "CEN_REG",     # Census Region
+    "C1R",         # Household Size
+    "LANGUAGE",    # Interview Language
+    "M_AGEGRP2",   # Mother's Age
+    "EDUC1",       # Maternal Education
+    "MARITAL2"     # Marital Status
+  )
+  
+  # Structure to store results
+  all_results <- list()
+  
+  # Loop through each vaccine
+  for(vaccine in vaccines) {
+    cat("\n\n========== ANALYZING", vaccine, "VACCINE ==========\n\n")
+    vaccine_results <- list()
+    
+    # Loop through each year
+    for(year in start_year:end_year) {
+      cat("\n----- Year 20", year, " -----\n", sep="")
+      
+      # Get the dataset for this year
+      df_name <- paste0("df", year, "2")
+      
+      if(!exists(df_name, envir = .GlobalEnv)) {
+        warning(paste("Dataset", df_name, "not found for year", year))
+        next
+      }
+      
+      # Get the dataset
+      df <- get(df_name, envir = .GlobalEnv)
+      
+      # Try multiple possible naming patterns for the coverage variable
+      coverage_patterns <- c(
+        paste0(vaccine, "_Coverage_", year),  # e.g., DTaP_Coverage_10
+        paste0(vaccine, "_Coverage"),         # e.g., DTaP_Coverage
+        paste0(vaccine, "Covered")            # e.g., DTaPCovered (if created by previous code)
+      )
+      
+      coverage_var <- NULL
+      for (pattern in coverage_patterns) {
+        if (pattern %in% names(df)) {
+          coverage_var <- pattern
+          break
+        }
+      }
+      
+      # Check if any coverage variable was found
+      if (is.null(coverage_var)) {
+        warning(paste("No coverage variable found for", vaccine, "in year", year))
+        next
+      }
+      
+      # Get the survey design object name
+      design_name <- paste0("nis_design", year)
+      
+      # Check if survey design exists or create it
+      if (!exists(design_name, envir = .GlobalEnv)) {
+        # Check if required columns exist
+        required_cols <- c("SEQNUMC", "STRATUM", "PROVWT_C")
+        missing_cols <- required_cols[!required_cols %in% names(df)]
+        
+        if(length(missing_cols) > 0) {
+          warning(paste("Missing required columns for survey design in year", year, ":", 
+                    paste(missing_cols, collapse=", ")))
+          next
+        }
+        
+        # Create the survey design object
+        survey_design <- survey::svydesign(
+          id = ~SEQNUMC,
+          strata = ~STRATUM,
+          weights = ~PROVWT_C,
+          data = df
+        )
+        
+        # Save to global environment
+        assign(design_name, survey_design, envir = .GlobalEnv)
+        cat("Created survey design object", design_name, "for year", year, "\n")
+      } else {
+        # Get existing survey design
+        survey_design <- get(design_name, envir = .GlobalEnv)
+      }
+      
+      # Check which predictors exist in this dataset
+      available_predictors <- predictors[predictors %in% names(df)]
+      missing_predictors <- predictors[!predictors %in% names(df)]
+      
+      if(length(missing_predictors) > 0) {
+        cat("Note: The following predictor variables are missing for year", year, ":\n")
+        cat(paste(" -", missing_predictors), sep = "\n")
+      }
+      
+      if(length(available_predictors) > 0) {
+        # Create formula string - keeping the predictors in the defined order
+        formula_str <- paste0(coverage_var, " ~ ", paste(available_predictors, collapse = " + "))
+        formula_obj <- as.formula(formula_str)
+        
+        cat("Model formula:", formula_str, "\n\n")
+        
+        tryCatch({
+          # Run the model
+          logistic_model <- svyglm(formula_obj, 
+                                  design = survey_design, 
+                                  family = quasibinomial())
+          
+          # Create model name and save to global environment
+          model_name <- paste0("logistic_model_", vaccine, "_", year)
+          assign(model_name, logistic_model, envir = .GlobalEnv)
+          
+          # Generate and print summary
+          model_summary <- summary(logistic_model)
+          print(model_summary)
+          
+          # Save summary to global environment
+          summary_name <- paste0("summary_", vaccine, "_", year)
+          assign(summary_name, model_summary, envir = .GlobalEnv)
+          
+          # Store in results list
+          vaccine_results[[paste0("year_", year)]] <- list(
+            model = logistic_model,
+            summary = model_summary
+          )
+          
+          cat("\nModel saved as", model_name, "in the global environment\n")
+        }, error = function(e) {
+          warning(paste("Error running model for", vaccine, "in year", year, ":", e$message))
+        })
+      } else {
+        warning("No predictor variables available for year", year)
+      }
+    }
+    
+    # Store results for this vaccine
+    all_results[[vaccine]] <- vaccine_results
+    cat("\nCompleted analysis for", vaccine, "vaccine\n")
+  }
+  
+  # Also run analysis for Combined7VaccineSeries if needed
+  cat("\n\n========== ANALYZING Combined 7-Vaccine Series ==========\n\n")
+  vaccine_results <- list()
+  
+  for(year in start_year:end_year) {
+    cat("\n----- Year 20", year, " -----\n", sep="")
+    
+    # Get the dataset
+    df_name <- paste0("df", year, "2")
+    if(!exists(df_name, envir = .GlobalEnv)) {
+      warning(paste("Dataset", df_name, "not found for year", year))
+      next
+    }
+    df <- get(df_name, envir = .GlobalEnv)
+    
+    # Check if Combined7VaccineSeries exists
+    if(!("Combined7VaccineSeries" %in% names(df))) {
+      warning(paste("Combined7VaccineSeries variable not found in dataset for year", year))
+      next
+    }
+    
+    # Get the survey design
+    design_name <- paste0("nis_design", year)
+    if (!exists(design_name, envir = .GlobalEnv)) {
+      warning(paste("Survey design", design_name, "not found for year", year))
+      next
+    }
+    survey_design <- get(design_name, envir = .GlobalEnv)
+    
+    # Check which predictors exist
+    available_predictors <- predictors[predictors %in% names(df)]
+    if(length(available_predictors) > 0) {
+      # Create formula
+      formula_str <- paste0("Combined7VaccineSeries ~ ", paste(available_predictors, collapse = " + "))
+      formula_obj <- as.formula(formula_str)
+      
+      cat("Model formula:", formula_str, "\n\n")
+      
+      tryCatch({
+        # Run the model
+        logistic_model <- svyglm(formula_obj, 
+                                design = survey_design, 
+                                family = quasibinomial())
+        
+        # Save model
+        model_name <- paste0("logistic_model_SERIES7_", year)
+        assign(model_name, logistic_model, envir = .GlobalEnv)
+        
+        # Generate and print summary
+        model_summary <- summary(logistic_model)
+        print(model_summary)
+        
+        # Save summary
+        summary_name <- paste0("summary_SERIES7_", year)
+        assign(summary_name, model_summary, envir = .GlobalEnv)
+        
+        # Store in results list
+        vaccine_results[[paste0("year_", year)]] <- list(
+          model = logistic_model,
+          summary = model_summary
+        )
+        
+        cat("\nModel saved as", model_name, "in the global environment\n")
+      }, error = function(e) {
+        warning(paste("Error running model for Combined7VaccineSeries in year", year, ":", e$message))
+      })
+    }
+  }
+  
+  # Store Combined7VaccineSeries results
+  all_results[["Combined7VaccineSeries"]] <- vaccine_results
+  
+  cat("\n\n===== ALL VACCINE ANALYSES COMPLETED =====\n")
+  return(invisible(all_results))
+}
+
+# Usage:
+analyze_individual_vaccines(10, 23)  # For years 2010-2023
+```
+
+```{r}
+# Function to create visualizations for vaccine coverage models
+create_vaccine_visualizations <- function(start_year, end_year) {
+  # List of vaccines
+  vaccines <- c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV", "Influenza", "HepA", "Rotavirus")
+  
+  # List of predictor variables
+  predictors <- c("AGEGRP", "C1R", "CBF_01", "CWIC_02", "EDUC1", "FRSTBRN", 
+                 "I_HISP_K", "INCPORAR", "LANGUAGE", "M_AGEGRP2", "MARITAL2",
+                 "RACE_K", "RACEETHK", "SEX", "INS_STAT2_I", "CEN_REG")
+  
+  # Years to analyze
+  years <- start_year:end_year
+  
+  # Initialize result data frame for the heatmap
+  heatmap_data <- data.frame()
+  
+  # Initialize data frame for coverage rates
+  coverage_data <- data.frame(
+    Year = character(),
+    Vaccine = character(),
+    CoverageRate = numeric(),
+    LowerCI = numeric(),
+    UpperCI = numeric()
+  )
+  
+  cat("Extracting results from models...\n")
+  
+  # Process each vaccine
+  for (vaccine in vaccines) {
+    cat("Processing", vaccine, "vaccine...\n")
+    
+    # Process each year
+    for (year in years) {
+      year_label <- paste0("20", year)
+      
+      # 1. Extract predictor significance from logistic models
+      model_name <- paste0("logistic_model_", vaccine, "_", year)
+      
+      if (exists(model_name, envir = .GlobalEnv)) {
+        model <- get(model_name, envir = .GlobalEnv)
+        
+        # Get model summary for p-values
+        model_summary <- summary(model)
+        coefs <- model_summary$coefficients
+        
+        # Extract p-values for each predictor
+        for (predictor in predictors) {
+          # Check for the predictor or predictor levels in coefficient names
+          predictor_matches <- grep(paste0("^", predictor, "$|^", predictor, "\\."), rownames(coefs))
+          
+          if (length(predictor_matches) > 0) {
+            # Get minimum p-value if multiple levels
+            p_values <- coefs[predictor_matches, 4]
+            min_p <- min(p_values)
+            
+            # Add to heatmap data
+            heatmap_data <- rbind(heatmap_data, data.frame(
+              Vaccine = vaccine,
+              Year = year_label,
+              Predictor = predictor,
+              PValue = min_p,
+              Significant = min_p < 0.05
+            ))
+          }
+        }
+        
+        # 2. Extract overall coverage rate
+        tryCatch({
+          # Get the dataset
+          df_name <- paste0("df", year, "2")
+          if (exists(df_name, envir = .GlobalEnv)) {
+            df <- get(df_name, envir = .GlobalEnv)
+            
+            # Get the survey design
+            design_name <- paste0("nis_design", year)
+            if (exists(design_name, envir = .GlobalEnv)) {
+              survey_design <- get(design_name, envir = .GlobalEnv)
+              
+              # Get coverage variable
+              coverage_var <- paste0(vaccine, "_Coverage_", year)
+              
+              if (coverage_var %in% names(df)) {
+                # Calculate mean coverage
+                formula_str <- paste0("~", coverage_var)
+                coverage_mean <- svymean(as.formula(formula_str), design = survey_design, na.rm = TRUE)
+                
+                # Get confidence intervals
+                ci <- confint(coverage_mean)
+                
+                # Add to coverage data
+                coverage_data <- rbind(coverage_data, data.frame(
+                  Year = year_label,
+                  Vaccine = vaccine,
+                  CoverageRate = as.numeric(coverage_mean),
+                  LowerCI = ci[1],
+                  UpperCI = ci[2]
+                ))
+              }
+            }
+          }
+        }, error = function(e) {
+          warning(paste("Error extracting coverage for", vaccine, "in year", year))
+        })
+      }
+    }
+  }
+  
+  # Save data for external use
+  write.csv(heatmap_data, "vaccine_predictor_significance.csv", row.names = FALSE)
+  write.csv(coverage_data, "vaccine_coverage_trends.csv", row.names = FALSE)
+  
+  # Create visualizations
+  if (requireNamespace("ggplot2", quietly = TRUE)) {
+    library(ggplot2)
+    
+    # 1. Create significance heatmap for each vaccine
+    for (vaccine in vaccines) {
+      # Filter data for this vaccine
+      vaccine_data <- subset(heatmap_data, Vaccine == vaccine)
+      
+      if (nrow(vaccine_data) > 0) {
+        # Create the heatmap
+        p <- ggplot(vaccine_data, aes(x = Year, y = Predictor, fill = Significant)) +
+          geom_tile(color = "white", linewidth= 0.5) +
+          scale_fill_manual(values = c("FALSE" = "#FF6B6B", "TRUE" = "#4ECDC4"),
+                           labels = c("FALSE" = "Not significant", "TRUE" = "Significant")) +
+          theme_minimal() +
+          theme(
+            axis.text.x = element_text(angle = 45, hjust = 1),
+            panel.grid.major = element_line(color = "gray95"),
+            panel.grid.minor = element_blank(),
+            legend.position = "right",
+            plot.title = element_text(hjust = 0.5)
+          ) +
+          labs(
+            title = paste(vaccine, "Vaccine: Predictor Significance Across Years"),
+            subtitle = "Red = Not significant, Teal = Significant (p < 0.05)",
+            x = "Year",
+            y = "Predictor",
+            fill = "Significance"
+          )
+        
+        # Save the plot
+        filename <- paste0(vaccine, "_predictor_significance.png")
+        ggsave(filename, p, width = 12, height = 8, dpi = 300)
+        cat("Created", filename, "\n")
+      }
+    }
+    
+    # 2. Create combined heatmap for all vaccines
+    if (nrow(heatmap_data) > 0) {
+      # Create predictor labels with full names for better readability
+      predictor_labels <- c(
+        "AGEGRP" = "Age Group",
+        "C1R" = "Number of Children",
+        "CBF_01" = "Ever Breastfed",
+        "CWIC_02" = "WIC Participation",
+        "EDUC1" = "Education Level",
+        "FRSTBRN" = "First Born",
+        "I_HISP_K" = "Hispanic Origin",
+        "INCPORAR" = "Income Level",
+        "LANGUAGE" = "Language",
+        "M_AGEGRP2" = "Mother's Age",
+        "MARITAL2" = "Marital Status",
+        "RACE_K" = "Race",
+        "RACEETHK" = "Race/Ethnicity",
+        "SEX" = "Gender",
+        "INS_STAT2_I" = "Insurance Status",
+        "CEN_REG" = "Census Region"
+      )
+      
+      # Add readable labels
+      heatmap_data$PredictorLabel <- predictor_labels[heatmap_data$Predictor]
+      heatmap_data$PredictorLabel[is.na(heatmap_data$PredictorLabel)] <- heatmap_data$Predictor[is.na(heatmap_data$PredictorLabel)]
+      
+      # Create the combined heatmap
+      p_all <- ggplot(heatmap_data, aes(x = Year, y = PredictorLabel, fill = Significant)) +
+        geom_tile(color = "white", linewidth = 0.5) +
+        scale_fill_manual(values = c("FALSE" = "#FF6B6B", "TRUE" = "#4ECDC4"),
+                         labels = c("FALSE" = "Not significant", "TRUE" = "Significant")) +
+        facet_wrap(~ Vaccine, ncol = 5) +
+        theme_minimal() +
+        theme(
+          axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+          axis.text.y = element_text(size = 7),
+          panel.grid = element_blank(),
+          strip.text = element_text(face = "bold"),
+          legend.position = "bottom",
+          plot.title = element_text(hjust = 0.5)
+        ) +
+        labs(
+          title = "Predictor Significance Across Vaccines and Years",
+          subtitle = "Red = Not significant, Teal = Significant (p < 0.05)",
+          x = "Year",
+          y = "Predictor",
+          fill = "Significance"
+        )
+      
+      # Save the combined plot
+      ggsave("all_vaccines_predictor_significance.png", p_all, width = 16, height = 12, dpi = 300)
+      cat("Created all_vaccines_predictor_significance.png\n")
+    }
+    
+    # 3. Create coverage trends visualization
+    if (nrow(coverage_data) > 0) {
+      p_coverage <- ggplot(coverage_data, aes(x = Year, y = CoverageRate, color = Vaccine, group = Vaccine)) +
+        geom_line(linewidth = 1) +
+        geom_point(size = 2) +
+        geom_errorbar(aes(ymin = LowerCI, ymax = UpperCI), width = 0.2) +
+        scale_y_continuous(labels = scales::percent_format(scale = 100), limits = c(0, 1)) +
+        theme_minimal() +
+        theme(
+          legend.position = "right",
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          panel.grid.minor = element_blank()
+        ) +
+        labs(
+          title = "Vaccine Coverage Rates Across Years",
+          subtitle = "With 95% Confidence Intervals",
+          x = "Year",
+          y = "Coverage Rate",
+          color = "Vaccine"
+        )
+      
+      # Save the coverage trend plot
+      ggsave("vaccine_coverage_trends.png", p_coverage, width = 12, height = 8, dpi = 300)
+      cat("Created vaccine_coverage_trends.png\n")
+    }
+  } else {
+    cat("Package 'ggplot2' is required for creating visualizations.\n")
+    cat("Install it with: install.packages('ggplot2')\n")
+    cat("Data has been saved to CSV files for manual visualization.\n")
+  }
+  
+  cat("\nVisualization process completed.\n")
+}
+
+# Usage:
+create_vaccine_visualizations(10, 23)  # For years 2010-2023
+```
+
+
+
+
+
+
+
+   
+
+
+```{r}
+# Function to create vaccine visualizations with custom arrangement
+create_vaccine_visualization <- function(start_year, end_year) {
+  # Load required libraries
+  library(ggplot2)
+  library(ggpubr)  # For ggarrange
+  
+  # Define predictors in order
+  all_predictors <- c(
+    # Child characteristics
+    "AGEGRP",      # Age Group
+    "SEX",         # Gender
+    "RACE_K",      # Race
+    "I_HISP_K",    # Hispanic Origin
+    "FRSTBRN",     # First Born Status
+    "CWIC_02",     # WIC Status
+    "CBF_01",      # Breastfeeding History
+    "INS_STAT2_I", # Insurance Coverage
+    
+    # Household characteristics
+    "INCPORAR",    # Income to Poverty Ratio
+    "CEN_REG",     # Census Region
+    "C1R",         # Household Size
+    "LANGUAGE",    # Interview Language
+    "M_AGEGRP2",   # Mother's Age
+    "EDUC1",       # Maternal Education
+    "MARITAL2"     # Marital Status
+  )
+  
+  # Define vaccine sequence according to specified order (matches your requirements)
+  row1 <- c("DTaP", "Polio", "MMR", "Hib")  
+  row2 <- c("HepB", "Varicella", "PCV", "Combined7VaccineSeries")
+  row3 <- c("Influenza", "HepA", "Rotavirus")
+  
+  # Combine all vaccines in the desired order
+  vaccines <- c(row1, row2, row3)
+  
+  # Define display labels for vaccines
+  vaccine_labels <- c(
+    "DTaP" = "DTaP", 
+    "Polio" = "Polio", 
+    "MMR" = "MMR", 
+    "Hib" = "Hib",
+    "HepB" = "HepB", 
+    "Varicella" = "Varicella", 
+    "PCV" = "PCV", 
+    "Combined7VaccineSeries" = "7-Vaccine Series",
+    "Influenza" = "Influenza", 
+    "HepA" = "HepA", 
+    "Rotavirus" = "Rotavirus"
+  )
+  
+  # Create empty data frame for results
+  all_data <- data.frame()
+  
+  # Process each vaccine
+  for(vaccine in vaccines) {
+    # Determine model prefix based on the model naming in your data
+    model_prefix <- ifelse(vaccine == "Combined7VaccineSeries", 
+                          "logistic_model_SERIES7", 
+                          paste0("logistic_model_", vaccine))
+    
+    # Process each year
+    for(year in start_year:end_year) {
+      model_name <- paste0(model_prefix, "_", year)
+      
+      if(exists(model_name, envir = .GlobalEnv)) {
+        # Get the model
+        model <- get(model_name, envir = .GlobalEnv)
+        # Get the coefficients
+        coefs <- summary(model)$coefficients
+        
+        # Process each predictor
+        for(pred in all_predictors) {
+          # Find matches for this predictor
+          pred_matches <- grep(paste0("^", pred, "$|^", pred, "\\."), rownames(coefs))
+          
+          if(length(pred_matches) > 0) {
+            # Get p-value and coefficient
+            p_values <- coefs[pred_matches, 4]
+            coef_values <- coefs[pred_matches, 1]
+            
+            # Find minimum p-value
+            min_p_idx <- which.min(p_values)
+            min_p <- p_values[min_p_idx]
+            coef_sign <- sign(coef_values[min_p_idx])
+            
+            # Set significance category
+            if(min_p < 0.05) {
+              significance <- ifelse(coef_sign > 0, "Positive Association", "Negative Association")
+            } else {
+              significance <- "Not Significant"
+            }
+          } else {
+            # Predictor not in model
+            significance <- "Not Significant"
+          }
+          
+          # Add to dataset
+          all_data <- rbind(all_data, data.frame(
+            Vaccine = vaccine,
+            VaccineLabel = vaccine_labels[vaccine],
+            Year = paste0("20", year),
+            Predictor = pred,
+            Significance = significance,
+            stringsAsFactors = FALSE
+          ))
+        }
+      } else {
+        # If model doesn't exist, add empty rows with Not Significant
+        for(pred in all_predictors) {
+          all_data <- rbind(all_data, data.frame(
+            Vaccine = vaccine,
+            VaccineLabel = vaccine_labels[vaccine],
+            Year = paste0("20", year),
+            Predictor = pred,
+            Significance = "Not Significant",
+            stringsAsFactors = FALSE
+          ))
+        }
+      }
+    }
+  }
+  
+  # Add predictor labels
+  predictor_labels <- c(
+    "AGEGRP" = "Age Group",
+    "SEX" = "Gender",
+    "RACE_K" = "Race",
+    "I_HISP_K" = "Hispanic Origin", 
+    "FRSTBRN" = "First Born Status",
+    "CWIC_02" = "WIC Status",
+    "CBF_01" = "Breastfeeding History",
+    "INS_STAT2_I" = "Insurance Coverage",
+    "INCPORAR" = "Income to Poverty Ratio",
+    "CEN_REG" = "Census Region",
+    "C1R" = "Household Size",
+    "LANGUAGE" = "Interview Language",
+    "M_AGEGRP2" = "Mother's Age",
+    "EDUC1" = "Maternal Education",
+    "MARITAL2" = "Marital Status"
+  )
+  
+  all_data$PredictorLabel <- predictor_labels[all_data$Predictor]
+  
+  # Create empty list to store individual plots
+  plot_list <- list()
+  
+  # Create individual plots for each vaccine
+  for(vaccine in vaccines) {
+    # Subset data for this vaccine
+    vaccine_data <- subset(all_data, Vaccine == vaccine)
+    
+    # Factor predictor labels for ordering (reverse order to have child factors at top)
+    vaccine_data$PredictorLabel <- factor(vaccine_data$PredictorLabel, 
+                                      levels = rev(predictor_labels))
+    
+    # Create individual plot
+    p <- ggplot(vaccine_data, 
+              aes(x = Year, y = PredictorLabel, fill = Significance)) +
+      geom_tile(color = "white", linewidth = 0.5) +
+      scale_fill_manual(values = c(
+        "Not Significant" = "gray80",
+        "Positive Association" = "darkgreen", 
+        "Negative Association" = "red"
+      )) +
+      theme_minimal() +
+      theme(
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        axis.text.y = element_text(size = 8),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        strip.text = element_text(face = "bold", size = 10),
+        strip.background = element_rect(fill = "white", color = NA),
+        legend.position = "none",  # Remove individual legends
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 9)
+      ) +
+      labs(
+        title = vaccine_labels[vaccine],
+        x = "",
+        y = ""
+      )
+    
+    # Add to list
+    plot_list[[vaccine]] <- p
+  }
+  
+  # Create arranged plot with specific layout
+  # First row
+  row1_plots <- list(
+    plot_list[["DTaP"]], 
+    plot_list[["Polio"]], 
+    plot_list[["MMR"]], 
+    plot_list[["Hib"]]
+  )
+  
+  # Second row
+  row2_plots <- list(
+    plot_list[["HepB"]], 
+    plot_list[["Varicella"]], 
+    plot_list[["PCV"]], 
+    plot_list[["Combined7VaccineSeries"]]
+  )
+  
+  # Third row (with a NULL placeholder to maintain 4 columns)
+  row3_plots <- list(
+    plot_list[["Influenza"]], 
+    plot_list[["HepA"]], 
+    plot_list[["Rotavirus"]],
+    NULL
+  )
+  
+  # Combine all plots
+  arranged_plot <- ggarrange(
+    plotlist = c(row1_plots, row2_plots, row3_plots),
+    ncol = 4, nrow = 3,
+    common.legend = TRUE, legend = "bottom"
+  )
+  
+  # Add overall title
+  arranged_plot <- annotate_figure(arranged_plot,
+    top = text_grob("Predictor Significance Across Vaccines and Years", 
+                   face = "bold", size = 14),
+    bottom = text_grob("Year", face = "bold", size = 10),
+    left = text_grob("Predictor", rot = 90, face = "bold", size = 10)
+  )
+  
+  # Save the arranged plot
+  ggsave("vaccine_predictors_visualization.png", arranged_plot, 
+         width = 15, height = 10, dpi = 300)
+  
+  # Return the plot
+  cat("Created visualization with custom arrangement\n")
+  return(arranged_plot)
+}
+
+# Run the function for years 10-23
+create_vaccine_visualization(10, 23)
+
+
+```
+
+
+
+
+```{r}
+# Load knitr for clean tables
+library(knitr)
+
+# Helper function to print odds ratios from a model
+print_odds_ratios <- function(model, model_name = "Logistic Model") {
+  if (missing(model) || is.null(model)) {
+    cat(paste("Model not found for", model_name, "\n"))
+    return(NULL)
+  }
+  
+  OR <- exp(coef(model))
+  CI <- exp(confint(model))
+  
+  or_table <- data.frame(
+    Variable = names(OR),
+    OddsRatio = round(OR, 3),
+    CI_Lower = round(CI[, 1], 3),
+    CI_Upper = round(CI[, 2], 3)
+  )
+  
+  cat(paste0("\n### Odds Ratios and 95% CI for ", model_name, "\n\n"))
+  print(kable(or_table, caption = paste("Odds Ratios for", model_name)))
+}
+
+# Loop over all years and vaccine models
+generate_all_odds_ratios <- function(start_year = 10, end_year = 23) {
+  vaccine_labels <- list(
+    Combined7VaccineSeries = "SERIES7",
+    HepACovered = "HepA",
+    InfluenzaCovered = "Influenza",
+    RotavirusCovered = "Rotavirus"
+  )
+  
+  for (year in start_year:end_year) {
+    cat("\n\n## Year 20", year, "\n", sep = "")
+    for (vaccine_var in names(vaccine_labels)) {
+      model_name <- paste0("logistic_model_", vaccine_labels[[vaccine_var]], "_", year)
+      if (exists(model_name, envir = .GlobalEnv)) {
+        model_obj <- get(model_name, envir = .GlobalEnv)
+        readable_name <- paste0(vaccine_labels[[vaccine_var]], " (20", year, ")")
+        print_odds_ratios(model_obj, readable_name)
+      } else {
+        cat("No model found for", model_name, "\n")
+      }
+    }
+  }
+}
+
+
+```
+
+```{r}
+# Function to create vaccine visualizations with custom arrangement
+create_vaccine_visualization <- function(start_year, end_year) {
+  # Load required libraries
+  library(ggplot2)
+  library(ggpubr)  # For ggarrange
+  
+  # Define predictors in order
+  all_predictors <- c(
+    # Child characteristics
+    "AGEGRP",      # Age Group
+    "SEX",         # Gender
+    "RACE_K",      # Race
+    "I_HISP_K",    # Hispanic Origin
+    "FRSTBRN",     # First Born Status
+    "CWIC_02",     # WIC Status
+    "CBF_01",      # Breastfeeding History
+    "INS_STAT2_I", # Insurance Coverage
+    
+    # Household characteristics
+    "INCPORAR",    # Income to Poverty Ratio
+    "CEN_REG",     # Census Region
+    "C1R",         # Household Size
+    "LANGUAGE",    # Interview Language
+    "M_AGEGRP2",   # Mother's Age
+    "EDUC1",       # Maternal Education
+    "MARITAL2"     # Marital Status
+  )
+  
+  # Define vaccine sequence according to specified order
+  row1 <- c("DTaP", "Polio", "MMR", "Hib")  
+  row2 <- c("HepB", "Varicella", "PCV")
+  row3 <- c("Influenza", "HepA", "Rotavirus")
+  
+  # Combine all vaccines in the desired order
+  vaccines <- c(row1, row2, row3)
+  
+  # Define display labels for vaccines
+  vaccine_labels <- c(
+    "DTaP" = "DTaP", 
+    "Polio" = "Polio", 
+    "MMR" = "MMR", 
+    "Hib" = "Hib",
+    "HepB" = "HepB", 
+    "Varicella" = "Varicella", 
+    "PCV" = "PCV", 
+    "Influenza" = "Influenza", 
+    "HepA" = "HepA", 
+    "Rotavirus" = "Rotavirus"
+  )
+  
+  # Create empty data frame for results
+  all_data <- data.frame()
+  
+  # Process each vaccine
+  for(vaccine in vaccines) {
+    # Determine model prefix based on the model naming in your data
+    model_prefix <- paste0("logistic_model_", vaccine)
+    
+    # Process each year
+    for(year in start_year:end_year) {
+      model_name <- paste0(model_prefix, "_", year)
+      
+      if(exists(model_name, envir = .GlobalEnv)) {
+        # Get the model
+        model <- get(model_name, envir = .GlobalEnv)
+        # Get the coefficients
+        coefs <- summary(model)$coefficients
+        
+        # Process each predictor
+        for(pred in all_predictors) {
+          # Find matches for this predictor
+          pred_matches <- grep(paste0("^", pred, "$|^", pred, "\\."), rownames(coefs))
+          
+          if(length(pred_matches) > 0) {
+            # Get p-value and coefficient
+            p_values <- coefs[pred_matches, 4]
+            coef_values <- coefs[pred_matches, 1]
+            
+            # Find minimum p-value
+            min_p_idx <- which.min(p_values)
+            min_p <- p_values[min_p_idx]
+            coef_sign <- sign(coef_values[min_p_idx])
+            
+            # Set significance category
+            if(min_p < 0.05) {
+              significance <- ifelse(coef_sign > 0, "Positive Association", "Negative Association")
+            } else {
+              significance <- "Not Significant"
+            }
+          } else {
+            # Predictor not in model
+            significance <- "Not Significant"
+          }
+          
+          # Add to dataset
+          all_data <- rbind(all_data, data.frame(
+            Vaccine = vaccine,
+            VaccineLabel = vaccine_labels[vaccine],
+            Year = paste0("20", year),
+            Predictor = pred,
+            Significance = significance,
+            stringsAsFactors = FALSE
+          ))
+        }
+      } else {
+        # If model doesn't exist, add empty rows with Not Significant
+        for(pred in all_predictors) {
+          all_data <- rbind(all_data, data.frame(
+            Vaccine = vaccine,
+            VaccineLabel = vaccine_labels[vaccine],
+            Year = paste0("20", year),
+            Predictor = pred,
+            Significance = "Not Significant",
+            stringsAsFactors = FALSE
+          ))
+        }
+      }
+    }
+  }
+  
+  # Add predictor labels
+  predictor_labels <- c(
+    "AGEGRP" = "Age Group",
+    "SEX" = "Gender",
+    "RACE_K" = "Race",
+    "I_HISP_K" = "Hispanic Origin", 
+    "FRSTBRN" = "First Born Status",
+    "CWIC_02" = "WIC Status",
+    "CBF_01" = "Breastfeeding History",
+    "INS_STAT2_I" = "Insurance Coverage",
+    "INCPORAR" = "Income to Poverty Ratio",
+    "CEN_REG" = "Census Region",
+    "C1R" = "Household Size",
+    "LANGUAGE" = "Interview Language",
+    "M_AGEGRP2" = "Mother's Age",
+    "EDUC1" = "Maternal Education",
+    "MARITAL2" = "Marital Status"
+  )
+  
+  all_data$PredictorLabel <- predictor_labels[all_data$Predictor]
+  
+  # Create individual plots for each vaccine and save them separately
+  for(vaccine in vaccines) {
+    # Subset data for this vaccine
+    vaccine_data <- subset(all_data, Vaccine == vaccine)
+    
+    # Factor predictor labels for ordering (reverse order to have child factors at top)
+    vaccine_data$PredictorLabel <- factor(vaccine_data$PredictorLabel, 
+                                      levels = rev(predictor_labels))
+    
+    # Create individual plot with LARGER font sizes
+    p <- ggplot(vaccine_data, 
+              aes(x = Year, y = PredictorLabel, fill = Significance)) +
+      geom_tile(color = "white", linewidth = 0.7) +
+      scale_fill_manual(values = c(
+        "Not Significant" = "gray80",
+        "Positive Association" = "darkgreen", 
+        "Negative Association" = "red"
+      )) +
+      theme_minimal() +
+      theme(
+        # Much larger font sizes
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14, face = "bold"),
+        axis.text.y = element_text(size = 14, face = "bold"),
+        axis.title.x = element_text(size = 16, face = "bold", margin = margin(t = 20)),
+        axis.title.y = element_text(size = 16, face = "bold", margin = margin(r = 20)),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        strip.text = element_text(face = "bold", size = 16),
+        strip.background = element_rect(fill = "white", color = NA),
+        legend.title = element_text(size = 14, face = "bold"),
+        legend.text = element_text(size = 13),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 18, margin = margin(b = 20)),
+        plot.margin = margin(20, 20, 20, 20)
+      ) +
+      labs(
+        title = paste(vaccine_labels[vaccine], "Vaccine Predictors"),
+        x = "Year",
+        y = "Predictor",
+        fill = "Significance"
+      )
+    
+    # Save individual plot with larger dimensions
+    ggsave(paste0(vaccine, "_predictors_visualization.png"), p, 
+           width = 12, height = 10, dpi = 300)
+    
+    cat("Created and saved visualization for", vaccine, "\n")
+  }
+  
+  # Return success message
+  return("Individual heatmaps have been created for each vaccine with larger font sizes")
+}
+
+# Run the function for years 10-23
+create_vaccine_visualization(10, 23)
+```
+
+
+```{r}
+# Function to create side-by-side heatmap visualizations for HepA, Influenza, and MMR using facet
+create_three_vaccine_facet_heatmap <- function(start_year, end_year) {
+  # Load required libraries
+  library(ggplot2)
+  
+  # Define the selected vaccines to visualize side by side
+  selected_vaccines <- c("HepA", "Influenza", "MMR")
+  
+  # Define predictor order (matching your example image)
+  all_predictors <- c(
+    # Child characteristics
+    "AGEGRP",      # Age Group
+    "SEX",         # Gender
+    "RACE_K",      # Race
+    "I_HISP_K",    # Hispanic Origin
+    "FRSTBRN",     # First Born Status
+    "CWIC_02",     # WIC Status
+    "CBF_01",      # Breastfeeding History
+    "INS_STAT2_I", # Insurance Coverage
+    
+    # Household characteristics
+    "INCPORAR",    # Income to Poverty Ratio
+    "CEN_REG",     # Census Region
+    "C1R",         # Household Size
+    "LANGUAGE",    # Interview Language
+    "M_AGEGRP2",   # Mother's Age
+    "EDUC1",       # Maternal Education
+    "MARITAL2"     # Marital Status
+  )
+  
+  # Define display labels for vaccines
+  vaccine_labels <- c(
+    "HepA" = "HepA Vaccine Predictors",
+    "Influenza" = "Influenza Vaccine Predictors",
+    "MMR" = "MMR Vaccine Predictors"
+  )
+  
+  # Create empty data frame for results
+  all_data <- data.frame()
+  
+  # Process each selected vaccine
+  for(vaccine in selected_vaccines) {
+    cat("Processing", vaccine, "vaccine...\n")
+    
+    # Determine model prefix based on the model naming in your data
+    model_prefix <- paste0("logistic_model_", vaccine)
+    
+    # Process each year
+    for(year in start_year:end_year) {
+      model_name <- paste0(model_prefix, "_", year)
+      
+      if(exists(model_name, envir = .GlobalEnv)) {
+        # Get the model
+        model <- get(model_name, envir = .GlobalEnv)
+        # Get the coefficients
+        coefs <- summary(model)$coefficients
+        
+        # Process each predictor
+        for(pred in all_predictors) {
+          # Find matches for this predictor
+          pred_matches <- grep(paste0("^", pred, "$|^", pred, "\\."), rownames(coefs))
+          
+          if(length(pred_matches) > 0) {
+            # Get p-value and coefficient
+            p_values <- coefs[pred_matches, 4]
+            coef_values <- coefs[pred_matches, 1]
+            
+            # Find minimum p-value
+            min_p_idx <- which.min(p_values)
+            min_p <- p_values[min_p_idx]
+            coef_sign <- sign(coef_values[min_p_idx])
+            
+            # Set significance category
+            if(min_p < 0.05) {
+              significance <- ifelse(coef_sign > 0, "Positive Association", "Negative Association")
+            } else {
+              significance <- "Not Significant"
+            }
+          } else {
+            # Predictor not in model
+            significance <- "Not Significant"
+          }
+          
+          # Add to dataset
+          all_data <- rbind(all_data, data.frame(
+            Vaccine = vaccine,
+            VaccineLabel = vaccine_labels[vaccine],
+            Year = paste0("20", year),
+            Predictor = pred,
+            Significance = significance,
+            stringsAsFactors = FALSE
+          ))
+        }
+      } else {
+        # If model doesn't exist, add empty rows with Not Significant
+        for(pred in all_predictors) {
+          all_data <- rbind(all_data, data.frame(
+            Vaccine = vaccine,
+            VaccineLabel = vaccine_labels[vaccine],
+            Year = paste0("20", year),
+            Predictor = pred,
+            Significance = "Not Significant",
+            stringsAsFactors = FALSE
+          ))
+        }
+      }
+    }
+  }
+  
+  # Add predictor labels
+  predictor_labels <- c(
+    "AGEGRP" = "Age Group",
+    "SEX" = "Gender",
+    "RACE_K" = "Race",
+    "I_HISP_K" = "Hispanic Origin", 
+    "FRSTBRN" = "First Born Status",
+    "CWIC_02" = "WIC Status",
+    "CBF_01" = "Breastfeeding History",
+    "INS_STAT2_I" = "Insurance Coverage",
+    "INCPORAR" = "Income to Poverty Ratio",
+    "CEN_REG" = "Census Region",
+    "C1R" = "Household Size",
+    "LANGUAGE" = "Interview Language",
+    "M_AGEGRP2" = "Mother's Age",
+    "EDUC1" = "Maternal Education",
+    "MARITAL2" = "Marital Status"
+  )
+  
+  all_data$PredictorLabel <- predictor_labels[all_data$Predictor]
+  
+  # Factor predictor labels for ordering (reverse order to have child factors at top)
+  all_data$PredictorLabel <- factor(all_data$PredictorLabel, levels = rev(predictor_labels))
+  
+  # Factor vaccine for ordering
+  all_data$Vaccine <- factor(all_data$Vaccine, levels = selected_vaccines)
+  
+  # Create faceted visualization
+  p <- ggplot(all_data, aes(x = Year, y = PredictorLabel, fill = Significance)) +
+    geom_tile(color = "white", linewidth = 0.7) +
+    scale_fill_manual(values = c(
+      "Not Significant" = "gray80",
+      "Positive Association" = "darkgreen", 
+      "Negative Association" = "red"
+    )) +
+    facet_grid(. ~ Vaccine, labeller = labeller(Vaccine = vaccine_labels)) +
+    theme_minimal() +
+    theme(
+      # Larger font sizes
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12, face = "bold"),
+      axis.text.y = element_text(size = 12, face = "bold"),
+      axis.title.x = element_text(size = 14, face = "bold", margin = margin(t = 20)),
+      axis.title.y = element_text(size = 14, face = "bold", margin = margin(r = 20)),
+      panel.grid = element_blank(),
+      panel.background = element_rect(fill = "white", color = NA),
+      plot.background = element_rect(fill = "white", color = NA),
+      strip.text = element_text(face = "bold", size = 14),
+      strip.background = element_rect(fill = "white", color = NA),
+      legend.title = element_text(size = 12, face = "bold"),
+      legend.text = element_text(size = 11),
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 16, margin = margin(b = 20)),
+      plot.margin = margin(20, 20, 20, 20),
+      panel.spacing = unit(2, "lines") # Add more space between facets
+    ) +
+    labs(
+      title = "Vaccine Predictors Side-by-Side Comparison",
+      x = "Year",
+      y = "Predictor",
+      fill = "Significance"
+    )
+  
+  # Save the faceted visualization
+  ggsave("HepA_Influenza_MMR_facet_comparison.png", p, width = 18, height = 10, dpi = 300)
+  
+  cat("\nCreated faceted visualization for HepA, Influenza, and MMR vaccines\n")
+  
+  # Also create individual plots (same as reference code but with only our 3 vaccines)
+  for(vaccine in selected_vaccines) {
+    # Subset data for this vaccine
+    vaccine_data <- subset(all_data, Vaccine == vaccine)
+    
+    # Create individual plot
+    p_individual <- ggplot(vaccine_data, 
+                aes(x = Year, y = PredictorLabel, fill = Significance)) +
+      geom_tile(color = "white", linewidth = 0.7) +
+      scale_fill_manual(values = c(
+        "Not Significant" = "gray80",
+        "Positive Association" = "darkgreen", 
+        "Negative Association" = "red"
+      )) +
+      theme_minimal() +
+      theme(
+        # Much larger font sizes for individual plots
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 14, face = "bold"),
+        axis.text.y = element_text(size = 14, face = "bold"),
+        axis.title.x = element_text(size = 16, face = "bold", margin = margin(t = 20)),
+        axis.title.y = element_text(size = 16, face = "bold", margin = margin(r = 20)),
+        panel.grid = element_blank(),
+        panel.background = element_rect(fill = "white", color = NA),
+        plot.background = element_rect(fill = "white", color = NA),
+        strip.text = element_text(face = "bold", size = 16),
+        strip.background = element_rect(fill = "white", color = NA),
+        legend.title = element_text(size = 14, face = "bold"),
+        legend.text = element_text(size = 13),
+        plot.title = element_text(hjust = 0.5, face = "bold", size = 18, margin = margin(b = 20)),
+        plot.margin = margin(20, 20, 20, 20)
+      ) +
+      labs(
+        title = vaccine_labels[vaccine],
+        x = "Year",
+        y = "Predictor",
+        fill = "Significance"
+      )
+    
+    # Save individual plot
+    ggsave(paste0(vaccine, "_predictors_visualization.png"), p_individual, 
+           width = 12, height = 10, dpi = 300)
+    
+    cat("Created and saved individual visualization for", vaccine, "\n")
+  }
+  
+  return(invisible(all_data))
+}
+
+# Usage example:
+create_three_vaccine_facet_heatmap(10, 23)  # For years 2010-2
+```
+```{r}
+# CDC Vaccination Requirements Visualization
+
+# Required libraries
+library(ggplot2)
+library(dplyr)
+
+# Create dataset of CDC vaccination requirements
+Vaccination_Requirements <- data.frame(
+  Vaccine = c("DTaP/DTP/DT", "Polio", "MMR", "Hib", 
+               "Hepatitis B", "Varicella", "PCV", 
+               "Influenza", "Hepatitis A", "Rotavirus"),
+  Doses_Required = c(4, 3, 1, 4, 3, 1, 4, 1, 2, 3)
+)
+
+# Custom color palette
+Custom_Palette <- c(
+  "#FF7F50", "#FF6347", "#FF4500", "#FF5733", "#FF6B6B",
+  "#FA8072", "#F4A460", "#FF9999", "#FF8C69", "#FFA07A"
+)
+
+# Create horizontal bar plot
+Vaccination_Plot <- ggplot(Vaccination_Requirements, 
+                           aes(x = Doses_Required, 
+                               y = reorder(Vaccine, Doses_Required), 
+                               fill = Vaccine)) +
+  # Add a subtle shadow effect
+  geom_bar(stat = "identity", width = 0.7, 
+           position = position_dodge(width = 0.9),
+           color = "gray50", 
+           size = 0.25) +
+  # Main bars
+  geom_bar(stat = "identity", width = 0.7, 
+           position = position_dodge(width = 0.9)) +
+  # Add dose requirement text with '>' symbol
+  geom_text(aes(label = paste(">", Doses_Required)), 
+            hjust = -0.2, 
+            color = "black", 
+            size = 3.5) +
+  labs(title = "CDC Vaccination Dose Requirements",
+       x = "Number of Doses", 
+       y = "Vaccine",
+       caption = "Source: Centers for Disease Control and Prevention") +
+  theme_minimal() +
+  theme(
+    panel.background = element_rect(fill = "white", color = "white"),
+    plot.background = element_rect(fill = "white", color = "white"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    legend.position = "none",
+    axis.title = element_text(face = "bold"),
+    plot.title = element_text(face = "bold", hjust = 0.5),
+    plot.caption = element_text(face = "italic")
+  ) +
+  scale_fill_manual(values = Custom_Palette) +
+  # Extend x-axis slightly to make room for dose numbers
+  scale_x_continuous(expand = expansion(mult = c(0, 0.1)))
+
+# Save the plot
+ggsave("CDC_Vaccination_Requirements.png", 
+       Vaccination_Plot, 
+       width = 10, 
+       height = 6, 
+       dpi = 300,
+       bg = "white")
+```
+
+
+
+
+
+
+
+
+```{r}
+analyze_education_coverage <- function(year_code = "232") {
+  library(ggplot2)
+  library(dplyr)
+  library(survey)
+  
+  # Load dataset
+  df <- get(paste0("df", year_code))
+  df <- df %>% filter(!is.na(EDUC1), PDAT == 1)
+  
+  # Add factors
+  df$education <- factor(df$EDUC1, levels = 1:4,
+                         labels = c("< 12 YEARS", "12 YEARS", "> 12 YEARS, NON-COLLEGE GRAD", "COLLEGE GRAD"))
+  df$region <- factor(df$CEN_REG, levels = 1:4,
+                      labels = c("NORTHEAST", "MIDWEST", "SOUTH", "WEST"))
+  df$college <- ifelse(df$EDUC1 == 4, "College Graduate", "Non-College Graduate")
+  
+  # Create Combined7VaccineSeries if not already present
+  if (!"Combined7VaccineSeries" %in% names(df)) {
+    vaccine_vars <- c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV")
+    vaccine_cols <- sapply(vaccine_vars, function(vx) grep(paste0(vx, "_Coverage"), names(df), value = TRUE)[1])
+    df$Combined7VaccineSeries <- eval(parse(text = paste0(
+      "ifelse(", paste0("df$", vaccine_cols, " == 1", collapse = " & "), ", 1, 0)"
+    )))
+  }
+  
+  # Survey design
+  design <- svydesign(id = ~SEQNUMC, strata = ~STRATUM, weights = ~PROVWT_C, data = df)
+  design <- update(design, education = df$education, region = df$region, college = df$college)
+  
+  # Coverage calculations
+  education_coverage <- svyby(~Combined7VaccineSeries, ~education, design, svymean, na.rm = TRUE) %>%
+    mutate(coverage_pct = round(100 * Combined7VaccineSeries, 1))
+  
+  college_comparison <- svyby(~Combined7VaccineSeries, ~college, design, svymean, na.rm = TRUE) %>%
+    mutate(coverage_pct = round(100 * Combined7VaccineSeries, 1))
+  
+  edu_region_coverage <- svyby(~Combined7VaccineSeries, ~education + region, design, svymean, na.rm = TRUE) %>%
+    mutate(coverage_pct = round(100 * Combined7VaccineSeries, 1))
+  
+  # Color palettes
+  edu_colors <- c("< 12 YEARS" = "#ffffcc", "12 YEARS" = "#c7e9b4",
+                  "> 12 YEARS, NON-COLLEGE GRAD" = "#7fcdbb", "COLLEGE GRAD" = "#2c7fb8")
+  
+  # Plot 1: Education-level bar chart
+  plot1 <- ggplot(education_coverage, aes(x = education, y = coverage_pct, fill = education)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = paste0(coverage_pct, "%")), vjust = -0.5, fontface = "bold") +
+    scale_fill_manual(values = edu_colors) +
+    labs(
+      title = "7-Vaccine Series Coverage by Maternal Education (2010–23)",
+      x = "Maternal Education", y = "Coverage (%)"
+    ) +
+    ylim(0, max(education_coverage$coverage_pct) * 1.2) +
+    theme_light() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"), 
+          axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none")
+  
+  # Plot 2: College vs Non-College
+  plot2 <- ggplot(college_comparison, aes(x = college, y = coverage_pct, fill = college)) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(label = paste0(coverage_pct, "%")), vjust = -0.5, fontface = "bold") +
+    scale_fill_manual(values = c("College Graduate" = "#2c7fb8", "Non-College Graduate" = "#7fcdbb")) +
+    labs(
+      title = "Vaccination Coverage: College vs. Non-College (2010–23)",
+      x = "Maternal Education", y = "Coverage (%)"
+    ) +
+    ylim(0, max(college_comparison$coverage_pct) * 1.2) +
+    theme_light() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+          legend.position = "none")
+  
+  # Plot 3: Heatmap by education and region
+  plot3 <- ggplot(edu_region_coverage, aes(x = region, y = education, fill = coverage_pct)) +
+    geom_tile() +
+    geom_text(aes(label = paste0(coverage_pct, "%")), 
+              color = "black", fontface = "bold") +
+    scale_fill_gradient(low = "white", high = "#2c7fb8", name = "Coverage (%)") +
+    labs(
+      title = "7-Vaccine Series Coverage by Region and Education (2010–23)",
+      x = "Census Region", y = "Maternal Education"
+    ) +
+    theme_light() +
+    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+          panel.grid = element_blank())
+  
+  # Display and save plots
+  print(plot1)
+  print(plot2)
+  print(plot3)
+  
+  ggsave("education_coverage_2010_23.png", plot1, width = 10, height = 7)
+  ggsave("college_vs_noncollege_2010_23.png", plot2, width = 10, height = 7)
+  ggsave("education_region_coverage_2010_23.png", plot3, width = 12, height = 8)
+  
+  return(list(
+    education_coverage = education_coverage,
+    college_comparison = college_comparison,
+    edu_region_coverage = edu_region_coverage,
+    plot1 = plot1, plot2 = plot2, plot3 = plot3
+  ))
+}
+
+# Run for 2023
+results <- analyze_education_coverage("232")
+
+```
+```{r}
+library(ggplot2)
+library(dplyr)
+
+# Extract the region-wise coverage by education from the results
+edu_region_coverage <- results$edu_region_coverage
+
+# Consistent color palette for regions
+region_colors <- c(
+  "NORTHEAST" = "coral",
+  "MIDWEST" = "purple",
+  "SOUTH" = "#88B04B",
+  "WEST" = "#F7CAC9"
+)
+
+# Faceted plot for each education level
+facet_plot <- ggplot(edu_region_coverage, aes(x = region, y = coverage_pct, fill = region)) +
+  geom_bar(stat = "identity", width = 0.6) +
+  geom_text(aes(label = paste0(coverage_pct, "%")), 
+            vjust = -0.5, size = 3.5, fontface = "bold") +
+  scale_fill_manual(values = region_colors) +
+  facet_wrap(~ education, ncol = 2, scales = "free_y") +
+  labs(
+    title = "Vaccination Coverage Across Regions by Maternal Education (2010-23)",
+    x = "Region",
+    y = "Coverage (%)",
+    fill = "Region"
+  ) +
+  ylim(0, max(edu_region_coverage$coverage_pct) * 1.2) +
+  theme_light() +
+  theme(
+    strip.text = element_text(size = 13, face = "bold"),
+    plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+    axis.title = element_text(size = 14, face = "bold"),
+    axis.text.x = element_text(size = 11, face = "bold", angle = 45, hjust = 1),
+    legend.title = element_text(size = 12, face = "bold"),
+    legend.text = element_text(size = 11),
+    panel.grid.major.x = element_blank(),
+    plot.margin = margin(20, 20, 20, 20)
+  )
+
+# Display and save
+print(facet_plot)
+ggsave("education_by_region_facet_plot.png", facet_plot, width = 12, height = 8, dpi = 300)
+
+```
+```{r}
+# Load packages
+library(dplyr)
+library(ggplot2)
+library(survey)
+
+# Define function
+analyze_education_region_survey <- function(year_code = "232") {
+  # Get dataset name and design name
+  df_name <- paste0("df", year_code)
+  design_name <- paste0("nis_design", substr(year_code, 1, 2))
+  
+  # Check if dataset exists
+  if (!exists(df_name)) stop(paste("Dataset", df_name, "not found"))
+  df <- get(df_name)
+  
+  # Filter data
+  df <- df %>%
+    filter(!is.na(EDUC1), PDAT == 1)
+  
+  # Define factor labels
+  df$education <- factor(df$EDUC1,
+                         levels = 1:4,
+                         labels = c("< 12 YEARS", "12 YEARS", "> 12 YEARS, NON-COLLEGE GRAD", "COLLEGE GRAD"))
+  
+  df$region <- factor(df$CEN_REG,
+                      levels = 1:4,
+                      labels = c("NORTHEAST", "MIDWEST", "SOUTH", "WEST"))
+  
+  # Create Combined7VaccineSeries if not present
+  if (!"Combined7VaccineSeries" %in% names(df)) {
+    vaccine_cols <- c()
+    for (vaccine in c("DTaP", "Polio", "MMR", "Hib", "HepB", "Varicella", "PCV")) {
+      possible_cols <- grep(paste0(vaccine, "_Coverage"), names(df), value = TRUE)
+      if (length(possible_cols) > 0) {
+        vaccine_cols[vaccine] <- possible_cols[1]
+      }
+    }
+    if (length(vaccine_cols) == 7) {
+      condition_expr <- paste(paste0("df$", vaccine_cols, " == 1"), collapse = " & ")
+      df$Combined7VaccineSeries <- eval(parse(text = paste0("ifelse(", condition_expr, ", 1, 0)")))
+    } else {
+      stop("Could not create Combined7VaccineSeries")
+    }
+  }
+  
+  # Survey design
+  survey_design <- svydesign(
+    id = ~SEQNUMC,
+    strata = ~STRATUM,
+    weights = ~PROVWT_C,
+    data = df
+  )
+  
+  # Survey coverage by education and region
+  edu_region_coverage <- svyby(
+    ~Combined7VaccineSeries,
+    ~education + region,
+    design = survey_design,
+    svymean,
+    na.rm = TRUE
+  ) %>%
+    rename(coverage = Combined7VaccineSeries) %>%
+    mutate(coverage_pct = round(100 * coverage, 1))
+  
+  # Region color palette (colorblind-friendly)
+  region_colors <- c(
+    "NORTHEAST" = "coral",
+    "MIDWEST"   = "purple",
+    "SOUTH"     = "#88b04b",
+    "WEST"      = "#F7CAC9"
+  )
+  
+  # Plot: Faceted bar chart
+  facet_plot <- ggplot(edu_region_coverage, aes(x = region, y = coverage_pct, fill = region)) +
+    geom_bar(stat = "identity", width = 0.6) +
+    geom_text(aes(label = paste0(coverage_pct, "%")), 
+              vjust = -0.5, size = 3.5, fontface = "bold") +
+    scale_fill_manual(values = region_colors) +
+    facet_wrap(~ education, ncol = 2) +
+    labs(
+      title = paste("Vaccination Coverage by Region and Maternal Education (2010-23)"),
+      x = "Region",
+      y = "Coverage (%)",
+      fill = "Region"
+    ) +
+    ylim(0, max(edu_region_coverage$coverage_pct) * 1.2) +
+    theme_light() +
+    theme(
+      strip.text = element_text(size = 13, face = "bold"),
+      plot.title = element_text(size = 16, face = "bold", hjust = 0.5),
+      axis.title = element_text(size = 14, face = "bold"),
+      axis.text.x = element_text(size = 11, face = "bold", angle = 45, hjust = 1),
+      legend.title = element_text(size = 12, face = "bold"),
+      panel.grid.major.x = element_blank(),
+      plot.margin = margin(20, 20, 20, 20)
+    )
+  
+  # Show and save
+  print(facet_plot)
+  ggsave(paste0("region_edu_facet_20", substr(year_code, 1, 2), ".png"),
+         facet_plot, width = 12, height = 8, dpi = 300)
+  
+  # Return summary
+  return(edu_region_coverage)
+}
+
+# Run the function for 2023 data
+edu_region_data <- analyze_education_region_survey("232")
+
+```
+
+
+
+
+
+
+
+
+```{r}
+# Load required libraries
+library(ggplot2)
+library(dplyr)
+library(gridExtra)
+
+# Function to process datasets and create the faceted bar chart
+create_vaccine_education_plot <- function() {
+  # Process 2018 data
+  df_2018 <- df182
+  
+  # Process 2023 data  
+  df_2023 <- df232
+  
+  # Function to prepare data from each dataset
+  prepare_data <- function(df, year) {
+    # Filter to keep only provider-verified data
+    df <- df %>% filter(PDAT == 1, !is.na(EDUC1), !is.na(CEN_REG))
+    
+    # Map region codes to labels
+    df$Region_Label <- factor(
+      df$CEN_REG,
+      levels = 1:4,
+      labels = c("East", "North", "South", "West")
+    )
+    
+    # Map education codes to labels
+    df$Education_Label <- factor(
+      df$EDUC1,
+      levels = 1:4, 
+      labels = c("< 12 YEARS", "12 YEARS", "> 12 YEARS, NON-COLLEGE GRAD", "COLLEGE GRAD")
+    )
+    
+    # Calculate average vaccination coverage by region and education
+    result <- df %>%
+      group_by(Region_Label, Education_Label) %>%
+      summarise(
+        vax_rate = mean(Combined7VaccineSeries, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      mutate(Year = as.factor(year))
+    
+    return(result)
+  }
+  
+  # Prepare data for both years
+  data_2018 <- prepare_data(df_2018, 2018)
+  data_2023 <- prepare_data(df_2023, 2023)
+  
+  # Combine data
+  combined_data <- rbind(data_2018, data_2023)
+  
+  # Create the plot
+  p <- ggplot(combined_data, aes(x = Region_Label, y = vax_rate, fill = Year)) +
+    geom_bar(stat = "identity", position = position_dodge(width = 0.9), width = 0.8) +
+    facet_wrap(~ Education_Label, nrow = 2) +
+    scale_fill_manual(values = c("2018" = "purple", "2023" = "coral")) +
+    scale_y_continuous(limits = c(0, 1), breaks = c(0, 0.5, 1.0), labels = c("0.0", "0.5", "1.0")) +
+    labs(
+      title = "7-Vaccine Series Coverage: Pre vs. Post-Pandemic by Maternal Education",
+      x = "Region",
+      y = "Coverage"
+    ) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(size = 12, face = "bold"),
+      axis.title = element_text(size = 10),
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      strip.text = element_text(size = 10, face = "bold"),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor = element_blank(),
+      legend.title = element_text(size = 10),
+      legend.position = "top"
+    )
+  
+  # Display the plot
+  print(p)
+  
+  # Save the plot
+  ggsave("vaccine_coverage_by_region_education_year.png", p, width = 10, height = 6, dpi = 300)
+  
+  return(p)
+}
+
+# Run the function
+vaccine_plot <- create_vaccine_education_plot()
+```
+
+
+
+
+```{r}
+install.packages("maps")
+```
+```{r}
+# Load required libraries
+library(ggplot2)
+library(maps)
+library(dplyr)
+
+# Create a function to map vaccination coverage by state
+map_vaccination_coverage <- function(vaccine_type = "MMR", birth_cohort = "2012-2016") {
+  
+  # This would be where you load the data
+  # In a real application, you would load state-level data from CDC or aggregate county data
+  # For this example, I'll create mock data based on general patterns mentioned in the article
+  
+  # Get state map data
+  states_map <- map_data("state")
+  
+  # Create mock state vaccination coverage data
+  # In a real application, you would replace this with actual data
+  set.seed(123) # For reproducibility
+  
+  state_data <- data.frame(
+    state = tolower(state.name),
+    coverage = runif(50, 60, 95) # Random values between 60-95%
+  )
+  
+  # Join the map data with the coverage data
+  map_data <- left_join(states_map, state_data, by = c("region" = "state"))
+  
+  # Create the map
+  ggplot(map_data, aes(x = long, y = lat, group = group, fill = coverage)) +
+    geom_polygon(color = "white", linewidth = 0.3) +
+    coord_map("albers", lat0 = 39, lat1 = 45) +
+    scale_fill_gradient2(
+      low = "lightblue", 
+      mid = "royalblue",
+      high = "darkblue",
+      midpoint = 80,
+      name = "Coverage (%)",
+      limits = c(60, 95),
+      breaks = seq(60, 95, by = 5)
+    ) +
+    labs(
+      title = paste(vaccine_type, "Vaccination Coverage by State"),
+      subtitle = paste("Birth Cohort:", birth_cohort),
+      caption = "Source: Based on National Immunization Survey-Child data"
+    ) +
+    theme_minimal() +
+    theme(
+      axis.text = element_blank(),
+      axis.title = element_blank(),
+      panel.grid = element_blank(),
+      legend.position = "right",
+      plot.title = element_text(size = 16, face = "bold"),
+      plot.subtitle = element_text(size = 12)
+    )
+}
+
+# Example usage
+mmr_map <- map_vaccination_coverage("MMR", "2012-2016")
+print(mmr_map)
+
+# Save the map
+ggsave("mmr_coverage_by_state.png", mmr_map, width = 10, height = 6, dpi = 300)
+```
+
+
+
+```{r}
+# Function to export all vaccine coverage data to CSV
+export_vaccine_coverage_to_csv <- function(start_year, end_year, output_file = "vaccine_coverage_data.csv") {
+  # Define the vaccines to include
+  vaccines <- c(
+    "DTaP" = "DTaP (≥4 doses)",
+    "Polio" = "Polio (≥3 doses)",
+    "MMR" = "MMR (≥1 dose)",
+    "Hib" = "Hib (Full series)",
+    "HepB" = "HepB (≥3 doses)",
+    "Varicella" = "Varicella (≥1 dose)",
+    "PCV" = "PCV (≥4 doses)",
+    "Combined7VaccineSeries" = "Combined 7-Vaccine Series",
+    "HepA" = "HepA (≥1 dose)",
+    "Rotavirus" = "Rotavirus",
+    "Influenza" = "Influenza (≥2 doses)"
+  )
+  
+  # Create a data frame to store all the coverage data
+  all_coverage_data <- data.frame(
+    Year = integer(),
+    Vaccine = character(),
+    Coverage = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  # For each year and vaccine, extract the coverage percentages
+  cat("Collecting vaccine coverage data...\n")
+  for(year in start_year:end_year) {
+    actual_year <- 2000 + year
+    cat(paste("Processing year", actual_year, "...\n"))
+    
+    # Get the dataset for this year
+    df_name <- paste0("df", year, "2")
+    
+    if(!exists(df_name, envir = .GlobalEnv)) {
+      warning(paste("Dataset", df_name, "not found for year", year))
+      next
+    }
+    
+    # Get the dataset
+    df <- get(df_name, envir = .GlobalEnv)
+    
+    # Process each vaccine
+    for(vaccine_var in names(vaccines)) {
+      vaccine_label <- vaccines[vaccine_var]
+      
+      # Check for Combined7VaccineSeries variable
+      if(vaccine_var == "Combined7VaccineSeries") {
+        if("Combined7VaccineSeries" %in% names(df)) {
+          # Calculate coverage percentage with survey weights if available
+          if("PROVWT" %in% names(df)) {
+            coverage_pct <- weighted.mean(df$Combined7VaccineSeries, df$PROVWT, na.rm = TRUE) * 100
+          } else {
+            coverage_pct <- mean(df$Combined7VaccineSeries, na.rm = TRUE) * 100
+          }
+          
+          # Add to the data frame
+          all_coverage_data <- rbind(all_coverage_data, data.frame(
+            Year = actual_year,
+            Vaccine = vaccine_label,
+            Coverage = round(coverage_pct, 1)
+          ))
+        }
+      } else {
+        # For individual vaccines, check both possible column name patterns
+        pattern1 <- paste0(vaccine_var, "_Coverage_", year)
+        pattern2 <- paste0(vaccine_var, "_Coverage")
+        
+        if(pattern1 %in% names(df)) {
+          col_name <- pattern1
+        } else if(pattern2 %in% names(df)) {
+          col_name <- pattern2
+        } else {
+          # Additional pattern for covered variables
+          if(paste0(vaccine_var, "Covered") %in% names(df)) {
+            col_name <- paste0(vaccine_var, "Covered")
+          } else {
+            # Skip if no matching column found
+            next
+          }
+        }
+        
+        # Calculate coverage percentage with survey weights if available
+        if("PROVWT" %in% names(df)) {
+          coverage_pct <- weighted.mean(df[[col_name]], df$PROVWT, na.rm = TRUE) * 100
+        } else {
+          coverage_pct <- mean(df[[col_name]], na.rm = TRUE) * 100
+        }
+        
+        # Add to the data frame
+        all_coverage_data <- rbind(all_coverage_data, data.frame(
+          Year = actual_year,
+          Vaccine = vaccine_label,
+          Coverage = round(coverage_pct, 1)
+        ))
+      }
+    }
+  }
+  
+  # Sort the data by Vaccine and Year
+  all_coverage_data <- all_coverage_data[order(all_coverage_data$Vaccine, all_coverage_data$Year), ]
+  
+  # Write to CSV
+  cat(paste("Writing data to", output_file, "...\n"))
+  write.csv(all_coverage_data, file = output_file, row.names = FALSE)
+  
+  # Also create a wide format version (pivot table style) for easier viewing
+  wide_output_file <- sub("\\.csv$", "_wide.csv", output_file)
+  
+  # Create wide format (pivot table)
+  if(requireNamespace("reshape2", quietly = TRUE)) {
+    library(reshape2)
+    wide_data <- dcast(all_coverage_data, Vaccine ~ Year, value.var = "Coverage")
+    write.csv(wide_data, file = wide_output_file, row.names = FALSE)
+    cat(paste("Also wrote wide format data to", wide_output_file, "\n"))
+  } else {
+    # Fallback to base R for reshaping
+    # Get unique years and vaccines
+    years <- unique(all_coverage_data$Year)
+    vaccines <- unique(all_coverage_data$Vaccine)
+    
+    # Create wide data frame
+    wide_data <- data.frame(Vaccine = vaccines)
+    
+    # Add columns for each year
+    for(yr in years) {
+      wide_data[[as.character(yr)]] <- NA
+    }
+    
+    # Fill in the data
+    for(i in 1:nrow(all_coverage_data)) {
+      row <- all_coverage_data[i, ]
+      vac_idx <- which(wide_data$Vaccine == row$Vaccine)
+      wide_data[vac_idx, as.character(row$Year)] <- row$Coverage
+    }
+    
+    # Write to CSV
+    write.csv(wide_data, file = wide_output_file, row.names = FALSE)
+    cat(paste("Also wrote wide format data to", wide_output_file, "\n"))
+  }
+  
+  cat(paste("\nDone! Coverage data exported to:", output_file, "and", wide_output_file, "\n"))
+  
+  # Return the data frames invisibly
+  return(invisible(list(long = all_coverage_data, wide = wide_data)))
+}
+
+# Function to check for missing Combined7VaccineSeries variables and create them if needed
+check_and_create_vaccine_variables <- function(start_year, end_year) {
+  cat("Checking for Combined7VaccineSeries variables...\n")
+  
+  # Keep track of years that need variable creation
+  years_needing_variables <- c()
+  
+  for(year in start_year:end_year) {
+    df_name <- paste0("df", year, "2")
+    
+    if(exists(df_name, envir = .GlobalEnv)) {
+      df <- get(df_name, envir = .GlobalEnv)
+      
+      if(!"Combined7VaccineSeries" %in% names(df)) {
+        years_needing_variables <- c(years_needing_variables, year)
+      }
+    } else {
+      # If the dataset doesn't exist, we can't create variables for it
+      cat(paste("Warning: Dataset", df_name, "not found. Skipping year 20", year, "\n", sep=""))
+    }
+  }
+  
+  # If we found years needing variable creation, ask if we should create them
+  if(length(years_needing_variables) > 0) {
+    cat(paste("The Combined7VaccineSeries variable needs to be created for years:", 
+              paste(paste0("20", years_needing_variables), collapse=", "), "\n"))
+    
+    response <- readline(prompt = "Would you like to create these variables now? (y/n): ")
+    
+    if(tolower(response) == "y") {
+      # Call the create_vaccine_variables function for each year
+      for(year in years_needing_variables) {
+        cat(paste("\nCreating variables for year 20", year, "...\n", sep=""))
+        # Call the existing create_vaccine_variables function
+        create_vaccine_variables(year)
+      }
+    } else {
+      cat("Continuing without creating missing variables.\n")
+    }
+  } else {
+    cat("All Combined7VaccineSeries variables exist.\n")
+  }
+}
+
+# Main function to check for variables and export coverage data
+download_vaccine_coverage_data <- function(start_year, end_year, output_file = "vaccine_coverage_data.csv") {
+  # First check and create any missing vaccine variables
+  check_and_create_vaccine_variables(start_year, end_year)
+  
+  # Then export the data to CSV
+  cat("\nExporting vaccine coverage data to CSV...\n")
+  result <- export_vaccine_coverage_to_csv(start_year, end_year, output_file)
+  
+  cat("\nSummary of exported data:\n")
+  cat(paste("- Total years covered:", length(unique(result$long$Year)), "\n"))
+  cat(paste("- Total vaccines covered:", length(unique(result$long$Vaccine)), "\n"))
+  cat(paste("- Total data points:", nrow(result$long), "\n"))
+  
+  # Show the locations of the files
+  cat(paste("\nFiles saved to working directory:", getwd(), "\n"))
+  cat(paste("- Long format (for analysis):", output_file, "\n"))
+  cat(paste("- Wide format (for viewing):", sub("\\.csv$", "_wide.csv", output_file), "\n"))
+  
+  return(invisible(result))
+}
+
+# Example usage:
+download_vaccine_coverage_data(10, 23)  # For years 2010-2023
+# Use double backslashes and quotes to handle spaces
+file_path <- "C:\\Users\\ramya\\Indiana University\\Pabon-Rodriguez, Felix - Ramya-Spring2025-ImmunizationProjectCDC\\vaccine_coverage.csv"
+
+# Or use file.path() function which handles path construction properly
+file_path <- file.path("C:", "Users", "ramya", "Indiana University", 
+                      "Pabon-Rodriguez, Felix - Ramya-Spring2025-ImmunizationProjectCDC", 
+                      "vaccine_coverage.csv")
+
+# Then use this path in the export function
+download_vaccine_coverage_data(10, 23, file_path)
+```
+
+
+DASHBOARD DEVELOPMENT
+
+```{r}
+export_full_vaccine_datasets <- function(start_year = 10, end_year = 23, export_path) {
+  cat("📤 Exporting full vaccine dataframes...\n\n")
+  
+  # Normalize the path (replace backslashes with slashes)
+  export_path <- gsub("\\\\", "/", export_path)
+  
+  # Create the folder if it doesn't exist
+  if (!dir.exists(export_path)) {
+    dir.create(export_path, recursive = TRUE)
+    cat(paste("✅ Created folder:", export_path, "\n"))
+  }
+  
+  for (year in start_year:end_year) {
+    df_name <- paste0("df", year, "2")
+    year_actual <- 2000 + year
+    file_name <- paste0("df_", year_actual, ".csv")
+    file_path <- file.path(export_path, file_name)
+    
+    if (!exists(df_name, envir = .GlobalEnv)) {
+      cat(paste("⚠️ Dataset", df_name, "not found — skipping year", year_actual, "\n"))
+      next
+    }
+    
+    # Get the dataframe
+    df <- get(df_name, envir = .GlobalEnv)
+    
+    # Remove any columns with names like 'year', 'Year', 'YEAR', 'year.1', etc.
+    df <- df[, !tolower(names(df)) %in% c("year")]
+    
+    # Add one clean 'Year' column
+    df$Year <- year_actual
+    
+    tryCatch({
+      write.csv(df, file = file_path, row.names = FALSE)
+      cat(paste("✅ Saved:", file_name, "\n"))
+    }, error = function(e) {
+      cat(paste("❌ Error saving year", year_actual, ":", e$message, "\n"))
+    })
+  }
+  
+  cat("\n🎯 All datasets exported successfully with only one clean 'Year' column.\n")
+}
+
+
+```
+
+
+
+
+
+```{r}
+export_full_vaccine_datasets(
+  start_year = 10,
+  end_year = 23,
+  export_path = "C:/Users/ramya/Indiana University/Pabon-Rodriguez, Felix - Ramya-Spring2025-ImmunizationProjectCDC"
+)
+
+```
+
+
+
+
+
+```{r}
+export_pdat_only <- function(start_year = 10, end_year = 23, desktop_path = "C:/Desktop") {
+  # Normalize the path
+  desktop_path <- gsub("\\\\", "/", desktop_path)
+
+  cat("📤 Saving PDAT-only files directly to:", desktop_path, "\n\n")
+
+  for (year in start_year:end_year) {
+    df_name <- paste0("NISPUF", year)
+    year_actual <- 2000 + year
+    file_name <- paste0("pdat_", year_actual, ".csv")
+    file_path <- file.path(desktop_path, file_name)
+    
+    # Check if dataset exists
+    if (!exists(df_name, envir = .GlobalEnv)) {
+      cat("⚠️ Dataset", df_name, "not found — skipping year", year_actual, "\n")
+      next
+    }
+    
+    df <- get(df_name, envir = .GlobalEnv)
+    
+    # Check if PDAT column exists
+    if (!"PDAT" %in% names(df)) {
+      cat("⚠️ 'PDAT' column not found in", df_name, "— skipping\n")
+      next
+    }
+    
+    # Create output with PDAT and Year
+    df_out <- data.frame(PDAT = df$PDAT, Year = year_actual)
+    
+    # Write to CSV
+    tryCatch({
+      write.csv(df_out, file = file_path, row.names = FALSE)
+      cat("✅ Saved:", file_name, "\n")
+    }, error = function(e) {
+      cat("❌ Error saving", file_name, ":", e$message, "\n")
+    })
+  }
+
+  cat("\n🎯 All PDAT files exported to:", desktop_path, "\n")
+}
+
+```
+
+
+
+
+```{r}
+export_pdat_only(
+  start_year = 10,
+  end_year = 23,
+  desktop_path = "C:/Desktop"
+)
+
+```
+
+
+
+
+
+
+
+
